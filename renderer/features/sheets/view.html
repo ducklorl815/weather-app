@@ -1,0 +1,19 @@
+<!--
+  ============================================================================
+  Partial View: 9527 (sheets)
+  ----------------------------------------------------------------------------
+  [Important] 此檔由「＋加入功能」→ PartialViews.load('sheets') 載入，
+  注入 mosaic tile 的 body 區域。請勿在 index.html 重複內嵌此 markup。
+  修改 DOM id 請同步 logic / main IPC。
+  ============================================================================
+-->
+<div class="sheets-filter-bar" id="sheets-filter-bar">
+                        <div class="filter-chips sheets-filter-main" id="sheets-status-chips">
+                            <button class="chip active" data-status="pending" onclick="event.stopPropagation(); setSheetsStatusFilter('pending')">待處理</button>
+                            <button class="chip" data-status="all" onclick="event.stopPropagation(); setSheetsStatusFilter('all')">全部</button>
+                        </div>
+                        <div class="sheets-facet-inline" id="sheets-type-row"></div>
+                        <div class="sheets-facet-inline" id="sheets-unit-row"></div>
+                    </div>
+                    <div class="sheets-facet-panel" id="sheets-facet-panel"></div>
+                    <div class="card-body" id="sheets-list"></div>

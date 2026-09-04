@@ -1,0 +1,32 @@
+---
+description: 開發／環境判斷與人工維護提示註解必須明確標示
+alwaysApply: true
+---
+
+# 開發判斷與人工維護註解
+
+## 環境／開發專用邏輯
+
+僅供開發、測試、除錯或環境差異的判斷，必須標籤分離，勿混入正式商業邏輯：
+
+`[Development Only]`、`[Debug Only]`、`[Test Only]`、`[Local|SIT|UAT|Production Environment]`、`[Temporary]`
+
+```javascript
+// [Development Only]
+// 此區塊僅供開發測試，正式環境不可啟用
+
+// [Temporary]
+// TODO: 正式功能完成後移除
+```
+
+## 人工維護提示
+
+需人工判斷、修改或特別注意處，使用明確標籤（目的是提醒，不是逐行解釋）：
+
+| 標籤 | 用途 |
+|------|------|
+| `[Manual]` | 依環境／業務需人工調整 |
+| `[Important]` | 修改會影響多處或全局 |
+| `[Do Not Modify]` | 自動產生或不建議改 |
+| `[TODO]` | 待補正式邏輯 |
+| `[Development Only]` | 僅開發／測試 |

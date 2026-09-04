@@ -1,0 +1,17 @@
+<!--
+  ============================================================================
+  Partial View: 網站瀏覽紀錄 (sitesVisits)
+  ----------------------------------------------------------------------------
+  [Important] 此檔由「＋加入功能」→ PartialViews.load('sitesVisits') 載入，
+  注入 mosaic tile 的 body 區域。請勿在 index.html 重複內嵌此 markup。
+  修改 DOM id 請同步 logic / main IPC。
+  ============================================================================
+-->
+<div class="sites-visits-toolbar">
+    <button type="button" class="link-btn" id="sites-visits-columns-btn" onclick="event.stopPropagation(); toggleSitesVisitsColumnPanel()">顯示欄位</button>
+    <button type="button" class="link-btn" onclick="event.stopPropagation(); openSitesDeptOrg()">部門組織</button>
+    <div class="sites-visits-columns-panel hidden" id="sites-visits-columns-panel"></div>
+</div>
+<div class="filter-chips" id="sites-visits-chips"></div>
+<div class="sites-visits-summary" id="sites-visits-summary"></div>
+<div class="card-body" id="sites-visits-list"></div>

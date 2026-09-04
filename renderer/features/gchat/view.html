@@ -1,0 +1,18 @@
+<!--
+  ============================================================================
+  Partial View: Little Reply (gchat)
+  ----------------------------------------------------------------------------
+  [Important] 此檔由「＋加入功能」→ PartialViews.load('gchat') 載入，
+  注入 mosaic tile 的 body 區域。請勿在 index.html 重複內嵌此 markup。
+  修改 DOM id 請同步 logic / main IPC。
+  ============================================================================
+-->
+<div class="gchat-panel">
+                    <div class="gchat-search-row">
+                        <input type="search" id="gchat-search-input" class="gchat-search-input" placeholder="搜尋姓名、分機、群組…"
+                            oninput="onGchatSearchInput(event)" onkeydown="if(event.key==='Escape'){this.value='';onGchatSearchInput(event);}">
+                    </div>
+                    <div id="gchat-pinned-block" class="gchat-pinned-block"></div>
+                    <div id="gchat-search-results" class="gchat-search-results" hidden></div>
+                    <div class="card-body" id="gchat-list"></div>
+                </div>

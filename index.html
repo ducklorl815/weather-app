@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LifeTour</title>
+    <!--
+      ============================================================================
+      index.html = Application Shell（大框架）
+      ----------------------------------------------------------------------------
+      [Important] 本檔只放：文件頭、共用 chrome、auth、mosaic 空殼、overlays。
+      各功能畫面請放到 renderer/features/<id>/view.html（Partial View）。
+      不要再把數千行功能 markup / 邏輯塞回本檔。
+      ============================================================================
+    -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap">
+    <link rel="stylesheet" href="renderer/shell/shell.css">
+</head>
+
+<body>
+<!--
+  ============================================================================
+  Shell DOM 組織（由上而下）
+  ----------------------------------------------------------------------------
+  1. .header              — 品牌／主題／設定／天氣列（常駐 chrome）
+  2. #gchat-toast-stack   — Chat 置頂提醒宿主
+  3. #auth-container      — 登入閘道
+  4. #detail-modal        — 共用詳情 Modal
+  5. #gchat-lightbox      — Chat 媒體預覽
+  6. #dashboard-shell     — 工作台：toolbar「加入功能」+ #mosaic
+  ※ 各功能 tile body → renderer/features/<type>/view.html（Partial View）
+  ============================================================================
+-->
+<div class="header">
+        <div class="title-area">
+            <h1>
+                <img src="icon.png" alt="Life" class="app-logo">
+                <span class="brand-name">LifeTour</span>
+            </h1>
+            <div class="theme-picker">
+                <button class="theme-toggle" onclick="toggleThemeMenu()" id="theme-btn" title="切換風格">🎨</button>
+                <div class="theme-menu-list" id="theme-menu"></div>
+            </div>
+            <div class="app-settings">
+                <button class="settings-toggle" onclick="toggleAppSettings()" id="settings-btn" title="設定">⚙</button>
+                <div class="app-settings-menu" id="app-settings-menu">
+                    <div class="settings-title">應用程式設定</div>
+                    <div class="settings-section" style="margin-top:4px;">
+                        <div class="settings-title" style="margin-top:0;">版本與更新</div>
+                        <p class="settings-hint" id="app-version-label" style="margin-top:0;">目前版本：…</p>
+                        <p class="settings-hint" id="app-update-hint" style="margin-top:4px;"></p>
+                        <div style="display:flex;gap:8px;margin-top:6px;">
+                            <button type="button" class="btn-ghost" style="flex:1;" onclick="checkAppUpdateManual()">檢查更新</button>
+                            <button type="button" class="btn-primary" style="flex:1;display:none;" id="app-update-action-btn" onclick="runAppUpdateAction()">確認更新</button>
+                        </div>
+                    </div>
+                    <div class="settings-title" style="margin-top:10px;">文字大小</div>
+                    <div class="font-scale-row" id="font-scale-row" role="group" aria-label="文字大小">
+                        <button type="button" class="font-scale-btn" data-scale="0.75" onclick="applyFontScale(0.75)">75%</button>
+                        <button type="button" class="font-scale-btn" data-scale="1" onclick="applyFontScale(1)">100%</button>
+                        <button type="button" class="font-scale-btn" data-scale="1.25" onclick="applyFontScale(1.25)">125%</button>
+                        <button type="button" class="font-scale-btn" data-scale="1.5" onclick="applyFontScale(1.5)">150%</button>
+                    </div>
+                    <p class="settings-hint" style="margin-top:0;">預設 100%。放大後版面間距會跟著調整，避免擠破畫面。</p>
+                    <div class="setting-toggle">
+                        <span>開機時自動啟動</span>
+                        <input type="checkbox" id="open-at-login" onchange="toggleOpenAtLogin(this.checked)">
+                    </div>
+                    <div class="setting-toggle">
+                        <span>彈跳訊息提醒</span>
+                        <input type="checkbox" id="gchat-alert-popup" onchange="toggleGchatAlertPopup(this.checked)">
+                    </div>
+                    <p class="settings-hint" style="margin-top:0;">開啟後，私人密語或群組 @你 會跳出置頂訊息框（最小化時也會顯示）。點訊息框可開啟回覆。關閉則完全不彈。</p>
+                    <div class="setting-toggle">
+                        <span>按 ✕ 時最小化到背景</span>
+                        <input type="checkbox" id="close-to-tray" onchange="toggleCloseToTray(this.checked)">
+                    </div>
+                    <p class="settings-hint" style="margin-top:0;">開啟後按視窗 ✕ 不會結束，只藏到背景；只要上方「彈跳訊息提醒」有開，仍會跳出訊息框。可從系統匣還原，或下方結束程式。</p>
+                    <div style="display:flex;gap:8px;margin-top:6px;">
+                        <button type="button" class="btn-ghost" style="flex:1;" onclick="minimizeAppToTray()">最小化</button>
+                        <button type="button" class="btn-ghost" style="flex:1;" onclick="quitAppFully()">結束程式</button>
+                    </div>
+                    <div id="dev-settings-panels">
+                    <div class="settings-section">
+                        <div class="settings-title">Little Reply（開發者）</div>
+                        <p class="settings-hint">先啟用 Google Chat API。加入「Little Reply」後再在小工具內按「授權使用」即可，不必登入時一次授權全部功能。</p>
+                        <button class="btn-primary" style="width:100%;" onclick="openGchatApiSetup()">開啟並啟用 Google Chat API</button>
+                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="authorizeGchat()">授權 Google Chat</button>
+                        <p class="settings-hint" id="gchat-settings-hint"></p>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-title">Google 試算表（開發者）</div>
+                        <p class="settings-hint">正式版已綁死讀取 9527。此區僅 npm start 開發模式可見。</p>
+                        <button class="btn-primary" style="width:100%;" onclick="openSheetsApiSetup()">開啟並啟用 Google Sheets API</button>
+                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="authorizeSheets()">授權 Google 試算表</button>
+                        <p class="settings-hint" id="sheet-settings-hint"></p>
+                        <div id="sheet-source-list"></div>
+                    </div>
+                    <div class="settings-section">
+                        <div class="settings-title">Google Sites 瀏覽紀錄</div>
+                        <p class="settings-hint">資料寫入試算表分頁「瀏覽紀錄」（不是其他分頁）。App 顯示以該分頁同步為準；若人數對不上請按「清除本機瀏覽快取並重同步」。</p>
+                        <label>專案名稱（可空白）</label>
+                        <input type="text" id="sites-project-name" placeholder="例如 官網改版、報修入口">
+                        <label>Google Site ID（編輯網址 /d/ 後面那串）</label>
+                        <input type="text" id="sites-project-url" placeholder="例如 1ZV6Hz0wLW03MhIyV0X-ovneFzv6oUPUq">
+                        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="addSitesVisitProject()">加入專案</button>
+                        <div id="sites-project-list"></div>
+                        <p class="settings-hint" id="sites-log-sheet-id" style="margin-top:8px;"></p>
+                        <button class="btn-ghost" style="margin-top:4px;width:100%;" onclick="copySitesLogSheetId()">複製紀錄試算表 ID（給 Apps Script）</button>
+                        <button class="btn-ghost" style="margin-top:4px;width:100%;" onclick="openSitesLogSheet()">開啟紀錄試算表</button>
+                        <button class="btn-primary" style="margin-top:8px;width:100%;" onclick="copySitesTrackerScript()">① 複製／顯示 Apps Script 程式碼</button>
+                        <button class="btn-ghost" style="margin-top:4px;width:100%;" onclick="exportSitesTrackerFile()">①b 匯出程式到桌面（.gs 檔）</button>
+                        <textarea id="sites-tracker-script-box" readonly rows="8" style="display:none;width:100%;margin-top:8px;font:11px/1.4 Consolas,monospace;box-sizing:border-box;"></textarea>
+                        <label style="margin-top:10px;">② 貼上「網頁應用程式」部署網址（必須含 /macros/s/…/exec）</label>
+                        <input type="text" id="sites-deploy-url" placeholder="https://script.google.com/macros/s/AKfycb…/exec">
+                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="saveSitesDeployUrl()">儲存部署網址並產生連結</button>
+                        <div id="sites-track-links" style="margin-top:8px;"></div>
+                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="clearSitesVisitsLocal()">清除本機瀏覽快取並重同步</button>
+                        <p class="settings-hint" id="sites-visits-hint"></p>
+                        <ol class="settings-steps" id="sites-visits-steps">
+                            <li>加入專案時請貼 <strong>編輯網址的 /d/ Site ID</strong>（不要只貼 <code>…/duck815?usp=sharing</code>）。</li>
+                            <li>按「複製 Apps Script」→ 貼到 script.google.com。貼上後請確認開頭有一行 <code>var LOG_SHEET_ID = '一長串ID'</code>，<strong>不可</strong>是 <code>PASTE_SPREADSHEET_ID</code>。若是，按「複製紀錄試算表 ID」手動改進去。</li>
+                            <li><strong>部署 → 新增部署 → 網頁應用程式</strong>。<br>執行身分：<strong>我</strong>；誰可以存取：<strong>網域內的所有人</strong>。</li>
+                            <li>複製網址，必須長得像：<code>https://script.google.com/macros/s/XXXX/exec</code>。<br>❌ 不要用 Drive、試算表、script 編輯器、或 <code>/dev</code> 網址。</li>
+                            <li>把該網址貼回上方「部署網址」並儲存；用「複製嵌入網址」嵌進 Site（插入→嵌入→網址）。</li>
+                            <li>發布後用<strong>同仁帳號</strong>開新分頁測：若嵌入區顯示「追蹤就緒」才算成功。超連結請用「複製轉址範例」（url 已 encode）。</li>
+                            <li>改過程式後一定要：<strong>管理部署 → 編輯 → 新版本</strong>。</li>
+                        </ol>
+                    </div>
+                    </div>
+                </div>
+            </div>
+            <button class="logout-btn" onclick="logoutApp()" title="重新授權">登出重整</button>
+        </div>
+
+        <div class="weather-widget" id="weather-widget">
+            <div class="header-clock" id="local-clock" title="當地時間">--:--</div>
+            <button type="button" class="focus-btn" id="focus-btn" title="Focus timer (25:00)" onclick="toggleFocusTimer()">Focus</button>
+            <button type="button" class="bug-report-btn" id="bug-report-btn" title="Bug／優化回報" onclick="toggleBugReportPanel(event)">
+                回報
+                <span class="bug-badge" id="bug-report-badge">0</span>
+            </button>
+            <button type="button" class="weather-loc" id="weather-loc-btn" title="點擊搜尋地區" onclick="toggleWeatherSearch(event)">📍 台北市</button>
+            <div class="weather-item">🌡️ <strong id="w-temp">--</strong>°C</div>
+            <div class="weather-item">💧 <strong id="w-hum">--</strong>%</div>
+            <div class="weather-item">☔ <strong id="w-rain">--</strong>%</div>
+            <div class="weather-search-panel" id="weather-search-panel" onclick="event.stopPropagation()">
+                <input type="text" id="weather-search-input" placeholder="搜尋城市／地區…" oninput="onWeatherSearchInput(event)" onkeydown="onWeatherSearchKey(event)">
+                <div class="weather-search-hits" id="weather-search-hits"></div>
+            </div>
+            <div class="bug-report-panel" id="bug-report-panel" onclick="event.stopPropagation()">
+                <div class="bug-tabs">
+                    <button type="button" class="active" id="bug-tab-new" onclick="switchBugReportTab('new')">新增回報</button>
+                    <button type="button" id="bug-tab-list" onclick="switchBugReportTab('list')">查看回報</button>
+                </div>
+                <div class="bug-report-body" id="bug-report-body"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="gchat-toast-stack" aria-live="polite"></div>
+
+    <div class="auth-container" id="auth-container">
+        <h2>解鎖您的生產力潛能</h2>
+        <h1>LifeTour</h1>
+        <p>首次登入會一次取得各功能所需權限；之後重開 App 會沿用登入資料，缺少的權限再補充即可。</p>
+        <p class="auth-probe-summary" id="auth-probe-summary" hidden></p>
+        <button class="btn-primary" id="btn-login-google" onclick="loginGoogle()">使用 Google 帳號登入並授權</button>
+        <button class="btn-ghost" id="btn-reconnect-google" hidden onclick="reconnectGoogleFromLogin()">重新連結 Google（不清除本機登入檔）</button>
+        <details class="auth-probe-details" id="auth-probe-details" hidden>
+            <summary>登入診斷（進階）</summary>
+            <pre id="auth-probe-pre"></pre>
+        </details>
+    </div>
+
+    <div id="detail-modal" class="modal-overlay" style="display: none;" onclick="onModalOverlayClick(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeModal()">✕</button>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="gchat-lightbox" onclick="closeGchatLightbox(event)">
+        <div class="gchat-lb-inner" onclick="event.stopPropagation()">
+            <div class="gchat-lb-toolbar">
+                <span id="gchat-lb-title">預覽</span>
+                <span id="gchat-lb-zoom-hint" class="gchat-lb-zoom-hint"></span>
+                <div>
+                    <button type="button" id="gchat-lb-open-ext" style="display:none;" onclick="openGchatLightboxExternal()">外部開啟</button>
+                    <button type="button" onclick="closeGchatLightbox()">關閉</button>
+                </div>
+            </div>
+            <div id="gchat-lb-body"></div>
+        </div>
+    </div>
+
+    <div class="dashboard-shell" id="dashboard-shell">
+        <div class="board-toolbar">
+            <div class="add-menu">
+                <button type="button" class="btn-ghost" id="add-widget-btn" onclick="toggleAddMenu()">＋ 加入功能</button>
+                <div class="add-menu-list" id="add-menu"></div>
+            </div>
+            <span class="board-hint">拖曳標題移動位置，拉右下角放大縮小；雙擊功能標題可重新連線</span>
+            <span class="session-hint" id="session-hint" hidden onclick="onSessionHintClick()"></span>
+        </div>
+        <div class="mosaic" id="mosaic"></div>
+    </div>
+
+    <!-- Shell：Partial loader → 功能邏輯佔位 → App 框架 -->
+    <script src="renderer/shell/partial-loader.js"></script>
+    <script src="gchat-emoji-catalog.js"></script>
+    <script src="gchat-emoji-picker.js"></script>
+    <script src="renderer/components/gchat-lightbox-zoom.js"></script>
+    <script src="renderer/components/gchat-pdf-viewer.js"></script>
+    <script src="renderer/features/calendar/logic.js"></script>
+    <script src="renderer/features/tasks/logic.js"></script>
+    <script src="renderer/features/gmail/logic.js"></script>
+    <script src="renderer/features/gchat/logic.js"></script>
+    <script src="renderer/features/sheets/logic.js"></script>
+    <script src="renderer/features/sitesVisits/logic.js"></script>
+    <script src="renderer/features/chat/logic.js"></script>
+    <script src="renderer/shell/app.js"></script>
+</body>
+
+</html>

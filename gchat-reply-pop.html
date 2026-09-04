@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>Little Reply</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap">
+  <link rel="stylesheet" href="renderer/components/gchat-reply-pop/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="top" id="top-bar">
+      <img class="top-avatar" id="top-avatar" alt="" referrerpolicy="no-referrer" />
+      <span class="top-emoji" id="top-emoji" aria-hidden="true"></span>
+      <div style="min-width:0; flex:1;">
+        <h1 id="title">Little Reply</h1>
+        <div class="meta" id="meta">載入中…</div>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="btn-minimize" title="縮到右下角">—</button>
+        <button type="button" id="btn-close" title="關閉">✕</button>
+      </div>
+    </div>
+    <div class="thread" id="thread"><div class="loading">讀取對話…</div></div>
+    <div class="composer" id="composer">
+      <div id="reply-chip" class="reply-chip">
+        <div class="chip-body">
+          <div class="chip-label" id="reply-chip-label">回覆此訊息</div>
+          <div class="chip-preview" id="reply-chip-preview"></div>
+        </div>
+        <button type="button" id="reply-chip-clear" title="取消">✕</button>
+      </div>
+      <div id="reply" contenteditable="true" data-placeholder="輸入回覆..."></div>
+      <div id="mention-suggest" class="mention-suggest" hidden></div>
+      <div id="attach-preview" class="attach-preview"></div>
+      <div class="row">
+        <label class="compose-attach-btn" title="附加圖片／檔案" aria-label="附加檔案">📎
+          <input type="file" id="attach-input" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip">
+        </label>
+        <button type="button" class="compose-emoji-btn" id="btn-compose-emoji" title="插入表情" aria-label="插入表情"></button>
+        <button type="button" class="btn btn-primary" id="btn-send">送出</button>
+      </div>
+    </div>
+  </div>
+  <div id="media-lightbox" onclick="closeMediaLightbox(event)">
+    <div class="gchat-lb-inner" onclick="event.stopPropagation()">
+      <div class="gchat-lb-toolbar">
+        <span id="media-lb-title">預覽</span>
+        <span id="media-lb-zoom-hint" class="gchat-lb-zoom-hint"></span>
+        <div>
+          <button type="button" id="media-lb-open-ext" style="display:none;" onclick="openMediaLightboxExternal()">外部開啟</button>
+          <button type="button" onclick="closeMediaLightbox()">關閉</button>
+        </div>
+      </div>
+      <div id="media-lightbox-body"></div>
+    </div>
+  </div>
+  <script src="gchat-emoji-catalog.js"></script>
+  <script src="gchat-emoji-picker.js"></script>
+  <script src="renderer/components/gchat-quick-search.js"></script>
+  <script src="renderer/components/gchat-lightbox-zoom.js"></script>
+  <script src="renderer/components/gchat-pdf-viewer.js"></script>
+  <script src="renderer/components/gchat-reply-pop/state.js"></script>
+  <script src="renderer/components/gchat-reply-pop/shell.js"></script>
+  <script src="renderer/components/gchat-reply-pop/thread-view.js"></script>
+  <script src="renderer/components/gchat-reply-pop/composer.js"></script>
+  <script src="renderer/components/gchat-reply-pop/live-refresh.js"></script>
+  <script src="renderer/components/gchat-reply-pop/app.js"></script>
+</body>
+</html>

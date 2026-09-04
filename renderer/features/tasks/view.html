@@ -1,0 +1,12 @@
+<!--
+  ============================================================================
+  Partial View: 待辦事項 (tasks)
+  ----------------------------------------------------------------------------
+  [Important] 此檔由「＋加入功能」→ PartialViews.load('tasks') 載入，
+  注入 mosaic tile 的 body 區域。請勿在 index.html 重複內嵌此 markup。
+  修改 DOM id 請同步 logic / main IPC。
+  ============================================================================
+-->
+<div class="card-body" id="task-list"></div>
+                    <div class="task-input-area"><input type="text" id="new-task" class="task-input" placeholder="新增任務..."
+                    onkeypress="if(event.key==='Enter') addTask()"><button class="add-btn" onclick="addTask()">+</button></div>

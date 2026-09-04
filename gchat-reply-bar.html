@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>Little Reply Bar</title>
+  <style>
+    :root {
+      --ui-scale: 1;
+      --bg-color: #ebe6df;
+      --text-main: #1a1815;
+      --text-sub: #524c44;
+      --card-bg: #fffcf7;
+      --card-border: #cfc5b8;
+      --accent-color: #2f4a66;
+      --accent-soft: #d5e0ec;
+      --item-bg: #ffffff;
+      --item-border: #d8d0c6;
+      --danger-color: #9b3d3d;
+      --btn-text: #f7f4ef;
+    }
+    [data-theme="dark"] {
+      --bg-color: #0f0e11;
+      --text-main: #f2ece4;
+      --text-sub: #b8b0a6;
+      --card-bg: #1c1b20;
+      --card-border: #3d3a43;
+      --accent-color: #9eb4cf;
+      --accent-soft: #2c3340;
+      --item-bg: #25242a;
+      --item-border: #45414c;
+      --danger-color: #e09a9a;
+      --btn-text: #121116;
+    }
+    [data-theme="forest"] {
+      --bg-color: #d7e6d4;
+      --text-main: #15231a;
+      --text-sub: #3f5644;
+      --card-bg: #f3faf1;
+      --card-border: #a8c4a6;
+      --accent-color: #246338;
+      --accent-soft: #c5dfc3;
+      --item-bg: #ffffff;
+      --item-border: #bcd0ba;
+      --danger-color: #9b3d3d;
+      --btn-text: #f3f8f3;
+    }
+    [data-theme="ocean"] {
+      --bg-color: #d4e3ee;
+      --text-main: #132533;
+      --text-sub: #3d5566;
+      --card-bg: #f1f7fb;
+      --card-border: #9fbdd0;
+      --accent-color: #1f5a7a;
+      --accent-soft: #c0d9e8;
+      --item-bg: #ffffff;
+      --item-border: #b4ccd9;
+      --danger-color: #9b3d3d;
+      --btn-text: #f2f7fa;
+    }
+    [data-theme="clay"] {
+      --bg-color: #ead8ca;
+      --text-main: #2a180f;
+      --text-sub: #6a4a38;
+      --card-bg: #fbf4ed;
+      --card-border: #d2b49f;
+      --accent-color: #9a3f1e;
+      --accent-soft: #efd0bc;
+      --item-bg: #fffdfb;
+      --item-border: #dbc3b1;
+      --danger-color: #9b3d3d;
+      --btn-text: #fdf6f0;
+    }
+    [data-theme="ink"] {
+      --bg-color: #0c1220;
+      --text-main: #eef3fb;
+      --text-sub: #a8b6cc;
+      --card-bg: #172033;
+      --card-border: #3a4a66;
+      --accent-color: #8eb6e0;
+      --accent-soft: #24344d;
+      --item-bg: #1e2a40;
+      --item-border: #425576;
+      --danger-color: #e09a9a;
+      --btn-text: #0c1220;
+    }
+    [data-theme="matcha"] {
+      --bg-color: #e5e2c8;
+      --text-main: #1f2614;
+      --text-sub: #4f5638;
+      --card-bg: #f7f5e6;
+      --card-border: #c5c39a;
+      --accent-color: #4f6328;
+      --accent-soft: #d7d8b0;
+      --item-bg: #fffeef;
+      --item-border: #d0cfaa;
+      --danger-color: #9b3d3d;
+      --btn-text: #f4f6e8;
+    }
+    html {
+      font-size: calc(16px * var(--ui-scale));
+    }
+    @media (max-width: 640px) {
+      html { font-size: calc(15px * var(--ui-scale)); }
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      background: transparent;
+      font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+      user-select: none;
+    }
+    /* [Important] 內縮給左上角紅點完整露出，不被視窗裁切 */
+    .shell {
+      position: absolute;
+      left: 8px;
+      top: 8px;
+      right: 0;
+      bottom: 0;
+      box-sizing: border-box;
+    }
+    .bar {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px 0 14px;
+      background: var(--card-bg);
+      color: var(--text-main);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      cursor: pointer;
+      overflow: visible;
+    }
+    .bar:hover {
+      background: var(--accent-soft);
+    }
+    .bar.is-open {
+      outline: 2px solid var(--accent-color);
+      outline-offset: -2px;
+    }
+    .title {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.82em;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bar-avatar {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: rgba(127,127,127,0.15);
+      display: none;
+    }
+    .bar-avatar.is-on { display: block; }
+    .bar-emoji {
+      flex-shrink: 0;
+      font-size: 0.95em;
+      line-height: 1;
+      display: none;
+    }
+    .bar-emoji.is-on { display: inline; }
+    .badge {
+      display: none;
+      position: absolute;
+      top: -7px;
+      left: -7px;
+      z-index: 5;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #e53935;
+      color: #fff;
+      font-size: calc(11px * var(--ui-scale));
+      font-weight: 800;
+      line-height: 18px;
+      text-align: center;
+      box-sizing: border-box;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      pointer-events: none;
+    }
+    .badge.is-on { display: inline-block; }
+    .close {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-sub);
+      cursor: pointer;
+      font-size: calc(12px * var(--ui-scale));
+    }
+    .close:hover {
+      background: rgba(155, 61, 61, 0.18);
+      color: var(--danger-color);
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="bar" id="bar" title="點擊展開／縮小對話">
+      <span class="badge" id="badge">0</span>
+      <img class="bar-avatar" id="avatar" alt="" referrerpolicy="no-referrer" />
+      <span class="bar-emoji" id="emoji" aria-hidden="true"></span>
+      <div class="title" id="title">Little Reply</div>
+      <button type="button" class="close" id="btn-close" title="關閉">✕</button>
+    </div>
+  </div>
+  <script src="renderer/components/gchat-quick-search.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const convKey = params.get('key') || '';
+
+    function applyTheme(theme) {
+      const id = theme || 'light';
+      document.documentElement.setAttribute('data-theme', id);
+    }
+
+    function paint(data = {}) {
+      if (data.title) document.getElementById('title').textContent = data.title;
+      if (data.theme) applyTheme(data.theme);
+      const n = Number(data.badge || 0) || 0;
+      const badge = document.getElementById('badge');
+      if (n > 0) {
+        badge.textContent = n > 99 ? '99+' : String(n);
+        badge.classList.add('is-on');
+      } else {
+        badge.classList.remove('is-on');
+      }
+      const avatar = document.getElementById('avatar');
+      const emojiEl = document.getElementById('emoji');
+      const iconUrl = String(data.iconUrl || '').trim();
+      const emoji = String(data.emoji || '').trim();
+      if (iconUrl && (/^https?:\/\//i.test(iconUrl) || /^data:image\//i.test(iconUrl))) {
+        avatar.src = iconUrl;
+        avatar.classList.add('is-on');
+        emojiEl.textContent = '';
+        emojiEl.classList.remove('is-on');
+      } else if (emoji) {
+        avatar.removeAttribute('src');
+        avatar.classList.remove('is-on');
+        emojiEl.textContent = emoji;
+        emojiEl.classList.add('is-on');
+      } else {
+        avatar.removeAttribute('src');
+        avatar.classList.remove('is-on');
+        emojiEl.textContent = '';
+        emojiEl.classList.remove('is-on');
+      }
+      document.getElementById('bar').classList.toggle('is-open', !!data.bubbleOpen);
+      document.getElementById('bar').title = data.bubbleOpen
+        ? '點擊縮小對話'
+        : '點擊展開對話';
+    }
+
+    function applyFontScale(scale) {
+      const opts = [0.75, 1, 1.25, 1.5];
+      const n = Number(scale);
+      const next = opts.some((v) => Math.abs(v - n) < 0.001) ? n : 1;
+      document.documentElement.style.setProperty('--ui-scale', String(next));
+    }
+
+    document.getElementById('bar').addEventListener('click', (e) => {
+      if (e.target.closest('#btn-close')) return;
+      window.api.gchatBarClick?.(convKey);
+    });
+    document.getElementById('btn-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.api.gchatBarClose?.(convKey);
+    });
+
+    window.api.onGchatBarUpdate?.((data) => {
+      if (data?.convKey && data.convKey !== convKey) return;
+      paint(data);
+    });
+    window.api.onAppTheme?.((theme) => applyTheme(theme));
+    window.api.onAppFontScale?.((scale) => applyFontScale(scale));
+
+    (async () => {
+      try {
+        const res = await window.api.getAppTheme?.();
+        if (res?.theme) applyTheme(res.theme);
+        const fs = await window.api.getAppFontScale?.();
+        if (fs?.scale != null) applyFontScale(fs.scale);
+        const state = await window.api.gchatBarState?.(convKey);
+        if (state) paint(state);
+      } catch (_) {}
+    })();
+
+    window.GchatQuickSearch?.init({
+      listenIpc: true,
+      useFloatingWindow: true,
+      onOpenContact: (item) => window.GchatQuickSearch.openCompactFromSearchItem(item, 'contact'),
+      onOpenSpace: (item) => window.GchatQuickSearch.openCompactFromSearchItem(item, 'space')
+    });
+  </script>
+</body>
+</html>

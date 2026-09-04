@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>Little Reply</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #1c2230;
+      overflow: hidden;
+      font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+      user-select: none;
+    }
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      display: inline-block;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      font-feature-settings: 'liga';
+      -webkit-font-smoothing: antialiased;
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    #stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .toast {
+      position: relative;
+      background: rgba(28, 34, 48, 0.96);
+      color: #f4f6fb;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 14px 36px rgba(0,0,0,0.35);
+      cursor: pointer;
+      animation: in 0.28s ease;
+    }
+    .toast-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 22px;
+      height: 22px;
+      border: 0;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.08);
+      color: #f4f6fb;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 22px;
+      padding: 0;
+      z-index: 2;
+    }
+    .toast-close:hover { background: rgba(255,255,255,0.16); }
+    .toast-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      padding-right: 22px;
+    }
+    .kind {
+      font-size: 0.72em;
+      font-weight: 700;
+      color: #7db7ff;
+      margin-bottom: 6px;
+    }
+    .toast-reply {
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      border: 1px solid rgba(125, 183, 255, 0.35);
+      border-radius: 8px;
+      background: rgba(125, 183, 255, 0.16);
+      color: #9ec5ff;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .toast-reply:hover { background: rgba(125, 183, 255, 0.3); }
+    .toast-reply svg { width: 18px; height: 18px; display: block; }
+    .toast-reply-under {
+      margin-top: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      background: transparent;
+      color: rgba(244,246,251,0.75);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.84em;
+      font-weight: 650;
+      padding: 4px 8px;
+      border-radius: 8px;
+      min-height: 30px;
+    }
+    .toast-reply-under:hover {
+      color: #a8d0ff;
+      background: rgba(125, 183, 255, 0.14);
+      text-decoration: none;
+    }
+    .toast-reply-under svg { width: 18px; height: 18px; display: block; flex-shrink: 0; }
+    .from { font-weight: 650; font-size: 0.92em; }
+    .space { font-size: 0.78em; opacity: 0.72; margin-top: 2px; }
+    .snippet {
+      margin-top: 8px;
+      font-size: 0.88em;
+      line-height: 1.45;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    @keyframes in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="stack"></div>
+  <script>
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function replyIconHtml() {
+      return `<svg class="reply-glyph" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`;
+    }
+
+    function markMaterialIcons() {
+      /* [Important] 回覆圖示固定用 SVG，不依 Material Symbols */
+    }
+
+    function resizeToContent() {
+      const stack = document.getElementById('stack');
+      const h = Math.max(40, (stack?.scrollHeight || 40) + 8);
+      window.api.gchatToastResize?.(Math.min(520, h));
+    }
+
+    function dismissToast(el) {
+      const stack = document.getElementById('stack');
+      el?.remove();
+      resizeToContent();
+      if (stack && !stack.children.length) window.api.gchatToastHide?.();
+    }
+
+    function openToast(name, el) {
+      window.api.gchatToastOpen?.(name);
+      dismissToast(el);
+    }
+
+    function pushToast(m) {
+      const stack = document.getElementById('stack');
+      if (!stack || !m?.name) return;
+      const trackKey = m.trackKey || m.spaceName || m.name;
+      const unreadN = Number(m.unreadCount || 1);
+      const unreadHint = unreadN > 1 ? ` · 未讀×${unreadN}` : '';
+      const kind = m.isDm ? '私人密語' : '@ 提及你';
+      const existing = [...stack.children].find(el =>
+        (trackKey && el.dataset?.trackKey === trackKey) || el.dataset?.msgName === m.name
+      );
+      if (existing) {
+        existing.dataset.msgName = m.name;
+        existing.dataset.trackKey = trackKey;
+        const kindEl = existing.querySelector('.kind');
+        const fromEl = existing.querySelector('.from');
+        const spaceEl = existing.querySelector('.space');
+        const snipEl = existing.querySelector('.snippet');
+        if (kindEl) kindEl.textContent = kind + unreadHint;
+        if (fromEl) fromEl.textContent = m.sender || '成員';
+        if (spaceEl) spaceEl.textContent = m.spaceDisplayName || '對話';
+        if (snipEl) snipEl.textContent = m.snippet || m.text || '（無文字）';
+        existing._openName = m.name;
+        stack.prepend(existing);
+        resizeToContent();
+        return;
+      }
+
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.dataset.msgName = m.name;
+      el.dataset.trackKey = trackKey;
+      el._openName = m.name;
+      el.innerHTML = `
+        <button type="button" class="toast-close" title="關閉">✕</button>
+        <div class="toast-head">
+          <div class="kind">${escapeHtml(kind)}${escapeHtml(unreadHint)}</div>
+          <button type="button" class="toast-reply" title="回覆" aria-label="回覆">${replyIconHtml()}</button>
+        </div>
+        <div class="from">${escapeHtml(m.sender || '成員')}</div>
+        <div class="space">${escapeHtml(m.spaceDisplayName || '對話')}</div>
+        <div class="snippet">${escapeHtml(m.snippet || m.text || '（無文字）')}</div>
+        <button type="button" class="toast-reply-under">${replyIconHtml()}<span>回覆</span></button>
+      `;
+      el.querySelector('.toast-close')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dismissToast(el);
+      });
+      el.querySelectorAll('.toast-reply, .toast-reply-under').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openToast(el._openName || m.name, el);
+        });
+      });
+      el.addEventListener('click', () => openToast(el._openName || m.name, el));
+      stack.prepend(el);
+      while (stack.children.length > 6) stack.lastElementChild.remove();
+      markMaterialIcons();
+      resizeToContent();
+    }
+
+    function dismissByMeta(meta) {
+      const stack = document.getElementById('stack');
+      if (!stack || !meta) return;
+      const trackKey = meta.trackKey || '';
+      const spaceName = meta.spaceName || '';
+      const names = new Set(meta.names || []);
+      [...stack.children].forEach(el => {
+        const hit = (trackKey && el.dataset.trackKey === trackKey)
+          || (names.size && names.has(el.dataset.msgName))
+          || (spaceName && String(el.dataset.trackKey || '').endsWith(spaceName));
+        if (hit) dismissToast(el);
+      });
+    }
+
+    window.api.onGchatToastPush?.(pushToast);
+    window.api.onGchatToastDismiss?.(dismissByMeta);
+  </script>
+</body>
+</html>

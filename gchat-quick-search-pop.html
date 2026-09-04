@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>快速搜尋</title>
+  <link rel="stylesheet" href="renderer/components/gchat-theme-vars.css">
+  <link rel="stylesheet" href="renderer/components/gchat-quick-search.css">
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+    }
+    .shell {
+      box-sizing: border-box;
+      height: 100%;
+      padding: 8px;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .panel {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border-radius: 12px;
+      border: 1px solid var(--item-border);
+      background: var(--card-bg);
+      box-shadow: var(--card-shadow);
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel" id="panel"></div>
+  </div>
+  <script src="renderer/components/gchat-quick-search.js"></script>
+  <script>
+    window.GchatQuickSearch?.init({
+      listenIpc: true,
+      onOpenContact: (item) => window.GchatQuickSearch.openCompactFromSearchItem(item, 'contact'),
+      onOpenSpace: (item) => window.GchatQuickSearch.openCompactFromSearchItem(item, 'space')
+    });
+
+    window.GchatQuickSearch?.mountInline(document.getElementById('panel'));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') window.api?.gchatQuickSearchHide?.();
+    });
+  </script>
+</body>
+</html>

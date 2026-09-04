@@ -1,0 +1,22 @@
+---
+description: 常數／設定／初始化集中；授權與權限邏輯集中管理
+alwaysApply: true
+---
+
+# 宣告、設定與授權集中
+
+## 宣告與初始化
+
+變數、常數、設定與初始化應集中在明確區域，勿散落在方法各處。建議區塊順序：
+
+1. Constants → 2. Variables → 3. Configuration → 4. Initialization → 5. Main Logic
+
+讓維護者能快速找到：固定值、可改設定、執行期變數。
+
+## 授權與權限
+
+以下邏輯必須集中在 Authorization Component / Service，**不可散落在各功能方法**：
+
+Authentication、Authorization、Permission、Role、Token、User Identity、Access Control
+
+功能需要權限時，一律透過既有授權組件／服務處理，不要在業務方法內重複寫判斷。

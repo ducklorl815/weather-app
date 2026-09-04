@@ -1,0 +1,62 @@
+{
+  "name": "LifeTour",
+  "version": "1.0.8",
+  "main": "main.js",
+  "productName": "LifeTour",
+  "scripts": {
+    "start": "chcp 65001 >nul & electron .",
+    "dist": "electron-builder --publish never",
+    "verify:pack": "node scripts/verify-pack-files.js",
+    "upload:gcs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/upload-release-gcs.ps1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "googleapis": "^144.0.0",
+    "mssql": "^12.7.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0"
+  },
+  "build": {
+    "appId": "com.productivity.hub",
+    "productName": "LifeTour",
+    "asar": true,
+    "files": [
+      "main.js",
+      "main/**/*",
+      "renderer/**/*",
+      "preload.js",
+      "index.html",
+      "gchat-toast.html",
+      "gchat-reply-pop.html",
+      "gchat-reply-bar.html",
+      "gchat-quick-search-pop.html",
+      "gchat-emoji-catalog.js",
+      "gchat-emoji-picker.js",
+      "sites-dept-org.html",
+      "dist-features.json",
+      "update-config.js",
+      "icon.png"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://storage.googleapis.com/lifetour-releases/"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LifeTour",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "runAfterFinish": false
+    }
+  }
+}

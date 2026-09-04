@@ -1,0 +1,59 @@
+<!--
+  ============================================================================
+  Partial View: 詢問機器人 (chat)
+  ----------------------------------------------------------------------------
+  [Important] 此檔由「＋加入功能」→ PartialViews.load('chat') 載入，
+  注入 mosaic tile 的 body 區域。請勿在 index.html 重複內嵌此 markup。
+  修改 DOM id 請同步 logic / main IPC。
+  ============================================================================
+-->
+<div class="chat-root">
+                    <div class="chat-wrap" id="chat-main">
+                        <div class="chat-log" id="chat-log">
+                            <div class="chat-bubble bot">先在設定填 SQL Server。提問時會先查 [erp].[dbo].[EMRequestForm] 的問題狀況（Situation）與解決方式（Process），再交給 Gemini 回答。</div>
+                        </div>
+                        <div class="chat-composer">
+                            <textarea id="chat-input" placeholder="問知識庫一個問題..." onkeydown="onChatKey(event)"></textarea>
+                            <button class="btn-primary" id="chat-send" onclick="sendChat()">送出</button>
+                        </div>
+                    </div>
+                    <div class="chat-panel" id="chat-kb">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                            <button class="btn-ghost" onclick="showChatView('chat')">← 對話</button>
+                            <button class="btn-primary" onclick="addKnowledgeFiles()">加入檔案</button>
+                        </div>
+                        <div id="kb-list" class="card-body" style="padding:0;"></div>
+                    </div>
+                    <div class="chat-panel" id="chat-settings">
+                        <button class="btn-ghost" onclick="showChatView('chat')" style="align-self:flex-start;">← 對話</button>
+                        <label>SQL 連線字串</label>
+                        <textarea id="sql-connection-string" placeholder="Server=192.168.1.10;Database=erp;User Id=帳號;Password=密碼;Encrypt=false;TrustServerCertificate=true;"></textarea>
+                        <label>SQL Server（沒有連線字串時才填）</label>
+                        <input type="text" id="sql-server" placeholder="例如 192.168.1.10 或 HOST\SQLEXPRESS">
+                        <label>連接埠</label>
+                        <input type="text" id="sql-port" placeholder="1433">
+                        <label>資料庫</label>
+                        <input type="text" id="sql-database" placeholder="erp">
+                        <label>資料表</label>
+                        <input type="text" id="sql-table" placeholder="dbo.EMRequestForm">
+                        <label>SQL 帳號</label>
+                        <input type="text" id="sql-user" placeholder="資料庫登入帳號">
+                        <label>SQL 密碼</label>
+                        <input type="password" id="sql-password" placeholder="貼上密碼">
+                        <label>Google Cloud 專案 ID（回答用）</label>
+                        <input type="text" id="gemini-project" placeholder="例如 my-gcp-project">
+                        <label>Gemini 區域</label>
+                        <select id="gemini-location">
+                            <option value="us-central1">us-central1</option>
+                            <option value="global">global</option>
+                            <option value="asia-east1">asia-east1</option>
+                            <option value="asia-northeast1">asia-northeast1</option>
+                            <option value="europe-west1">europe-west1</option>
+                        </select>
+                        <label>模型</label>
+                        <input type="text" id="gemini-model" placeholder="gemini-2.5-flash">
+                        <button class="btn-primary" onclick="saveGeminiSettings()">儲存設定</button>
+                        <div class="loading" id="gemini-status" style="margin:0;padding:0;text-align:left;"></div>
+                        <div class="loading" style="margin:0;padding:0;text-align:left;">提問會先用 SQL 查 EMRequestForm（Situation=問題狀況、Process=解決方式），再把結果交給 Gemini。連線帳密只存在本機。</div>
+                    </div>
+                    </div>

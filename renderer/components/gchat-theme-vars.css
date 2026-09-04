@@ -1,0 +1,101 @@
+/**
+ * Little Reply／快速搜尋共用主題變數（與 shell.css 一致）
+ * [Important] 修改時請同步 renderer/shell/shell.css 各主題色
+ */
+:root {
+  --bg-color: #ebe6df;
+  --text-main: #1a1815;
+  --text-sub: #524c44;
+  --card-bg: #fffcf7;
+  --card-border: #cfc5b8;
+  --card-shadow: 0 8px 24px rgba(50, 40, 25, 0.1);
+  --accent-color: #2f4a66;
+  --accent-soft: #d5e0ec;
+  --item-bg: #ffffff;
+  --item-border: #d8d0c6;
+  --scroll-thumb: #b8aea1;
+}
+
+[data-theme="dark"] {
+  --bg-color: #0f0e11;
+  --text-main: #f2ece4;
+  --text-sub: #b8b0a6;
+  --card-bg: #1c1b20;
+  --card-border: #3d3a43;
+  --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --accent-color: #9eb4cf;
+  --accent-soft: #2c3340;
+  --item-bg: #25242a;
+  --item-border: #45414c;
+  --scroll-thumb: #55505a;
+}
+
+[data-theme="forest"] {
+  --bg-color: #d7e6d4;
+  --text-main: #15231a;
+  --text-sub: #3f5644;
+  --card-bg: #f3faf1;
+  --card-border: #a8c4a6;
+  --card-shadow: 0 8px 24px rgba(30, 60, 35, 0.12);
+  --accent-color: #246338;
+  --accent-soft: #c5dfc3;
+  --item-bg: #ffffff;
+  --item-border: #bcd0ba;
+  --scroll-thumb: #8fad90;
+}
+
+[data-theme="ocean"] {
+  --bg-color: #d4e3ee;
+  --text-main: #132533;
+  --text-sub: #3d5566;
+  --card-bg: #f1f7fb;
+  --card-border: #9fbdd0;
+  --card-shadow: 0 8px 24px rgba(25, 55, 80, 0.12);
+  --accent-color: #1f5a7a;
+  --accent-soft: #c0d9e8;
+  --item-bg: #ffffff;
+  --item-border: #b4ccd9;
+  --scroll-thumb: #8eacbe;
+}
+
+[data-theme="clay"] {
+  --bg-color: #ead8ca;
+  --text-main: #2a180f;
+  --text-sub: #6a4a38;
+  --card-bg: #fbf4ed;
+  --card-border: #d2b49f;
+  --card-shadow: 0 8px 24px rgba(90, 50, 25, 0.12);
+  --accent-color: #9a3f1e;
+  --accent-soft: #efd0bc;
+  --item-bg: #fffdfb;
+  --item-border: #dbc3b1;
+  --scroll-thumb: #c49f86;
+}
+
+[data-theme="ink"] {
+  --bg-color: #0c1220;
+  --text-main: #eef3fb;
+  --text-sub: #a8b6cc;
+  --card-bg: #172033;
+  --card-border: #3a4a66;
+  --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.48);
+  --accent-color: #8eb6e0;
+  --accent-soft: #24344d;
+  --item-bg: #1e2a40;
+  --item-border: #425576;
+  --scroll-thumb: #4e5f7a;
+}
+
+[data-theme="matcha"] {
+  --bg-color: #e5e2c8;
+  --text-main: #1f2614;
+  --text-sub: #4f5638;
+  --card-bg: #f7f5e6;
+  --card-border: #c5c39a;
+  --card-shadow: 0 8px 24px rgba(60, 60, 25, 0.12);
+  --accent-color: #4f6328;
+  --accent-soft: #d7ddb8;
+  --item-bg: #fffcf4;
+  --item-border: #d2d0ad;
+  --scroll-thumb: #b0ae88;
+}

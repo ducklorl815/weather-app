@@ -1,0 +1,28 @@
+---
+description: 程式架構：大框架→功能區塊→組件，優先可維護與模組化
+alwaysApply: true
+---
+
+# 程式碼架構原則
+
+目標：**方便後續人工維護、閱讀、除錯與擴充**。清楚 > 快速；可維護 > 過度集中。
+
+## 分層結構
+
+```text
+Application → Configuration / Constants → Authorization → Common
+           → Modules（功能區塊）→ Components（可重用組件）→ Development
+```
+
+- 新功能先放入對應 **Module**，不要整包塞進單一檔案或方法。
+- 可重複使用、單一責任、可獨立測試／替換的邏輯 → 抽成 **Component / Service**。
+- 不要為分層而過度拆分；依複雜度決定 Controller / Service / Repository 等層級。
+
+## 檔案拆分時機
+
+出現以下任一情況就應拆檔：不同功能或責任、可能獨立修改、可被複用、已難閱讀或難測試。
+
+## AI 修改順序
+
+1. 理解現有架構 → 2. 對應功能區塊 → 3. 優先重用既有組件  
+4. 無則新建 Component/Service → 5. 放入正確區塊 → 6. 必要人工提示註解 → 7. 不破壞既有架構

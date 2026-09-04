@@ -1,0 +1,37 @@
+directories:
+  output: dist
+  buildResources: build
+appId: com.productivity.hub
+productName: LifeTour
+asar: true
+files:
+  - filter:
+      - main.js
+      - main/**/*
+      - renderer/**/*
+      - preload.js
+      - index.html
+      - gchat-toast.html
+      - gchat-reply-pop.html
+      - gchat-reply-bar.html
+      - gchat-quick-search-pop.html
+      - gchat-emoji-catalog.js
+      - gchat-emoji-picker.js
+      - sites-dept-org.html
+      - dist-features.json
+      - update-config.js
+      - icon.png
+publish:
+  - provider: generic
+    url: https://storage.googleapis.com/lifetour-releases/
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LifeTour
+  artifactName: ${productName}-Setup-${version}.${ext}
+  runAfterFinish: false
+electronVersion: 28.3.3
