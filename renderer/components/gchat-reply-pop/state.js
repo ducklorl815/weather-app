@@ -50,7 +50,8 @@
     var mentionActive = -1;
     var mentionQuery = '';
     var spaceMembersCache = new Map();
-    var spaceMembersLoading = '';
+    /** @type {Map<string, Promise<any[]>>} 同一 space 的成員載入去重 */
+    var spaceMembersInflight = new Map();
     var liveThread = [];
     var refreshBusy = false;
     var historyHydrating = false;

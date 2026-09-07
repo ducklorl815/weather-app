@@ -1816,10 +1816,14 @@
                     ].filter(Boolean).slice(0, 2);
                     const preview = previewBits.map(t => escapeHtml(t)).join('　');
                     const stateLabel = item.done ? (item.status || '已完成') : (item.status || '待處理');
+                    const rowId = item.rowNumber != null ? `#${item.rowNumber}` : '';
                     return `
                     <div class="list-item" onclick="showSheetRowModal(${idx})">
                         <div class="event-header">
-                            <span class="event-title">${escapeHtml(item.title)}</span>
+                            <div class="event-title-stack">
+                                ${rowId ? `<span class="sheet-row-id">${escapeHtml(rowId)}</span>` : ''}
+                                <span class="event-title">${escapeHtml(item.title)}</span>
+                            </div>
                             ${badge}
                         </div>
                         <div class="event-details">${preview || escapeHtml(stateLabel)}</div>
@@ -1890,10 +1894,14 @@
                 item.sheetName ? `<span class="sheet-chip">${escapeHtml(item.sheetName)}</span>` : '',
                 item.sourceName ? `<span class="sheet-chip">${escapeHtml(item.sourceName)}</span>` : ''
             ].filter(Boolean).join('');
+            const rowId = item.rowNumber != null ? `#${item.rowNumber}` : '';
             setModalKind('sheet-modal');
             document.getElementById('modal-body').innerHTML = `
                 <div class="sheet-ticket">
-                    <div class="sheet-ticket-title">${escapeHtml(item.title)}</div>
+                    <div class="sheet-ticket-heading">
+                        ${rowId ? `<div class="sheet-row-id sheet-row-id--modal">${escapeHtml(rowId)}</div>` : ''}
+                        <div class="sheet-ticket-title">${escapeHtml(item.title)}</div>
+                    </div>
                     <div class="sheet-ticket-meta">${chips}</div>
                     <div class="sheet-ticket-body">
                         <dl class="sheet-kv">${fields || '<div class="loading">沒有欄位內容</div>'}</dl>

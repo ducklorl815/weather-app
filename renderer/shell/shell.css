@@ -490,6 +490,31 @@
             height: 100%;
         }
 
+        /* 編號 = 試算表原生列號，畫面寫成 #N（次要字，不搶 title／狀態） */
+        .sheet-row-id {
+            font-size: 0.72em;
+            font-weight: 500;
+            line-height: 1.2;
+            color: var(--text-sub);
+            letter-spacing: 0.02em;
+        }
+
+        .sheet-row-id--modal {
+            font-size: 0.78em;
+        }
+
+        .event-title-stack,
+        .sheet-ticket-heading {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .event-title-stack {
+            flex: 1;
+        }
+
         .sheet-ticket-title {
             font-size: 1.08em;
             font-weight: 650;

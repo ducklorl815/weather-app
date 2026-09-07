@@ -106,32 +106,37 @@
       };
     }
 
-    function paintMentionSuggest(items) {
-      const box = document.getElementById('mention-suggest');
-      if (!box) return;
-      mentionHits = items || [];
-      if (!mentionHits.length) {
-        hideMentionSuggest();
+    function paintMentionSuggest(itemsOrParts) {
+      if (Array.isArray(itemsOrParts)) {
+        paintMentionSuggestParts({
+          partitioned: false,
+          memberHits: itemsOrParts,
+          refHits: [],
+          membersLoading: false
+        });
         return;
       }
-      mentionActive = 0;
-      box.hidden = false;
-      box.innerHTML = mentionHits.map((c, i) => {
-        const label = escapeHtml(c.label || c.userName || '');
-        const hint = escapeHtml(c.hint || c.email || '聯絡人');
-        const iconUrl = String(c.iconUrl || '').trim();
-        const letter = escapeHtml(String(c.label || '?').charAt(0));
-        const avatar = (iconUrl && (/^https?:\/\//i.test(iconUrl) || /^data:image\//i.test(iconUrl)))
-          ? `<img class="mention-suggest-avatar" src="${escapeHtml(iconUrl)}" alt="" referrerpolicy="no-referrer" />`
-          : `<span class="mention-suggest-avatar is-letter">${letter}</span>`;
-        return `<button type="button" class="mention-suggest-item${i === 0 ? ' is-active' : ''}" data-idx="${i}">
+      paintMentionSuggestParts(itemsOrParts || {});
+    }
+
+    function renderMentionSuggestItem(c, i) {
+      const label = escapeHtml(c.label || c.userName || '');
+      const hint = escapeHtml(c.hint || c.email || '聯絡人');
+      const iconUrl = String(c.iconUrl || '').trim();
+      const letter = escapeHtml(String(c.label || '?').charAt(0));
+      const avatar = (iconUrl && (/^https?:\/\//i.test(iconUrl) || /^data:image\//i.test(iconUrl)))
+        ? `<img class="mention-suggest-avatar" src="${escapeHtml(iconUrl)}" alt="" referrerpolicy="no-referrer" />`
+        : `<span class="mention-suggest-avatar is-letter">${letter}</span>`;
+      return `<button type="button" class="mention-suggest-item${i === mentionActive ? ' is-active' : ''}" data-idx="${i}">
           ${avatar}
           <span class="mention-suggest-meta">
             <div class="mention-suggest-name">${label}</div>
             <div class="mention-suggest-hint">${hint}</div>
           </span>
         </button>`;
-      }).join('');
+    }
+
+    function bindMentionSuggestClicks(box) {
       box.querySelectorAll('.mention-suggest-item').forEach((btn) => {
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
@@ -139,6 +144,56 @@
           insertMentionHit(mentionHits[idx]);
         });
       });
+    }
+
+    /**
+     * 群組：分區「群組成員」／「不在此群・僅參考」；私人：平坦列表。
+     * 預設高亮：有成員命中 → 成員區第一筆；否則僅參考第一筆。
+     */
+    function paintMentionSuggestParts({
+      partitioned = false,
+      memberHits = [],
+      refHits = [],
+      membersLoading = false
+    } = {}) {
+      const box = document.getElementById('mention-suggest');
+      if (!box) return;
+
+      const members = Array.isArray(memberHits) ? memberHits : [];
+      const refs = Array.isArray(refHits) ? refHits : [];
+      mentionHits = [...members, ...refs];
+
+      if (!mentionHits.length && !membersLoading) {
+        hideMentionSuggest();
+        return;
+      }
+
+      // Q8：有成員命中 → 預設成員區第一筆；否則落到僅參考
+      mentionActive = members.length ? 0 : (refs.length ? members.length : -1);
+      box.hidden = false;
+
+      if (!partitioned) {
+        box.innerHTML = mentionHits.map((c, i) => renderMentionSuggestItem(c, i)).join('');
+        bindMentionSuggestClicks(box);
+        return;
+      }
+
+      let html = '';
+      html += `<div class="mention-suggest-section-title">群組成員</div>`;
+      if (members.length) {
+        html += members.map((c, i) => renderMentionSuggestItem(c, i)).join('');
+      }
+      if (membersLoading) {
+        html += `<div class="mention-suggest-loading" aria-live="polite">載入成員…</div>`;
+      } else if (!members.length) {
+        html += `<div class="mention-suggest-empty">沒有符合的成員</div>`;
+      }
+      if (refs.length) {
+        html += `<div class="mention-suggest-section-title">不在此群・僅參考</div>`;
+        html += refs.map((c, i) => renderMentionSuggestItem(c, members.length + i)).join('');
+      }
+      box.innerHTML = html;
+      bindMentionSuggestClicks(box);
     }
 
     function shortMentionLabel(label) {
@@ -268,7 +323,7 @@
         ? String(hit.userName)
         : (hit.userName ? `users/${hit.userName}` : '');
       const label = shortMentionLabel(hit.label || hit.email || userName);
-      // 群組內成員 → 真 @；群組外／僅標籤 → 純文字（不提醒、不邀請）
+      // 群組內成員 → 真提及；不在群組 → 僅參考標籤（不提醒、不邀請）
       const labelOnly = hit.labelOnly === true || hit.inSpace === false;
       const chip = document.createElement('span');
       chip.className = 'mention-chip' + (labelOnly ? ' is-label-only' : '');
@@ -308,18 +363,23 @@
       const spaceName = String(ctx?.spaceName || '').trim();
       if (!spaceName) return [];
       if (spaceMembersCache.has(spaceName)) return spaceMembersCache.get(spaceName);
-      if (spaceMembersLoading === spaceName) return [];
-      spaceMembersLoading = spaceName;
-      try {
-        const res = await window.api.gchatSpaceMembers?.({ spaceName });
-        const members = Array.isArray(res?.members) ? res.members : [];
-        spaceMembersCache.set(spaceName, members);
-        return members;
-      } catch (_) {
-        return [];
-      } finally {
-        if (spaceMembersLoading === spaceName) spaceMembersLoading = '';
-      }
+      if (spaceMembersInflight.has(spaceName)) return spaceMembersInflight.get(spaceName);
+      const p = (async () => {
+        try {
+          const res = await window.api.gchatSpaceMembers?.({ spaceName });
+          const members = Array.isArray(res?.members) ? res.members : [];
+          spaceMembersCache.set(spaceName, members);
+          return members;
+        } catch (_) {
+          const empty = [];
+          spaceMembersCache.set(spaceName, empty);
+          return empty;
+        } finally {
+          spaceMembersInflight.delete(spaceName);
+        }
+      })();
+      spaceMembersInflight.set(spaceName, p);
+      return p;
     }
 
     function filterByMentionQuery(list, q) {
@@ -331,78 +391,145 @@
       });
     }
 
+    function buildAllMentionHit() {
+      return {
+        kind: 'contact',
+        userName: 'users/all',
+        label: '全部成員',
+        hint: '@all',
+        iconUrl: '',
+        inSpace: true
+      };
+    }
+
+    function shouldIncludeAllMention(q) {
+      const s = String(q || '').trim().toLowerCase();
+      return !s || 'all'.startsWith(s) || '全部'.startsWith(s);
+    }
+
+    function buildGroupMemberHits(members, q) {
+      const hits = filterByMentionQuery(members, q).map((m) => ({
+        ...m,
+        inSpace: true,
+        labelOnly: false,
+        hint: m.hint || '群組成員'
+      }));
+      // @all 釘在「群組成員」區最上方
+      if (shouldIncludeAllMention(q)) hits.unshift(buildAllMentionHit());
+      return hits.slice(0, 10);
+    }
+
+    async function buildGroupRefHits(members, q) {
+      if (!q) return [];
+      const res = await window.api.gchatSearch?.({ query: q });
+      const memberIds = new Set((members || []).map((m) => m.userName));
+      const refs = [];
+      for (const c of res?.contacts || []) {
+        const un = String(c.userName || '').trim();
+        if (!un || memberIds.has(un)) continue;
+        if (refs.some((x) => x.userName === un)) continue;
+        refs.push({
+          ...c,
+          inSpace: false,
+          labelOnly: true,
+          hint: '僅參考・不提醒'
+        });
+        if (refs.length >= 8) break;
+      }
+      return refs;
+    }
+
     async function runMentionSearch(query) {
       mentionQuery = query;
       const q = String(query || '').trim();
-      let contacts = [];
       const inGroup = isGroupMentionContext();
 
       if (inGroup) {
-        // 群組：優先／預設只列群組成員（真 @）
-        const members = await ensureSpaceMembersLoaded();
-        if (mentionQuery !== query) return;
-        contacts = filterByMentionQuery(members, q).map((m) => ({
-          ...m,
-          inSpace: true,
-          hint: m.hint || '群組成員'
-        }));
+        const spaceName = String(ctx?.spaceName || '').trim();
+        const hasCache = spaceMembersCache.has(spaceName);
+        const memberPromise = ensureSpaceMembersLoaded();
 
-        // 有關鍵字時：目錄命中但不在群組 → 僅標籤（不提醒／不邀請）
-        if (q) {
-          const res = await window.api.gchatSearch?.({ query: q });
+        // 無快取：先畫「載入成員…」；有關鍵字時目錄可並行，成員到齊再刷新（不升級已插入 chip）
+        if (!hasCache) {
+          paintMentionSuggestParts({
+            partitioned: true,
+            membersLoading: true,
+            memberHits: shouldIncludeAllMention(q) ? [buildAllMentionHit()] : [],
+            refHits: []
+          });
+          const dirPromise = q ? window.api.gchatSearch?.({ query: q }) : null;
+          const [members, dirRes] = await Promise.all([
+            memberPromise,
+            dirPromise || Promise.resolve(null)
+          ]);
           if (mentionQuery !== query) return;
-          const memberIds = new Set(members.map((m) => m.userName));
-          for (const c of res?.contacts || []) {
+
+          const memberHits = buildGroupMemberHits(members, q);
+          const memberIds = new Set((members || []).map((m) => m.userName));
+          const refHits = [];
+          for (const c of dirRes?.contacts || []) {
             const un = String(c.userName || '').trim();
             if (!un || memberIds.has(un)) continue;
-            if (contacts.some((x) => x.userName === un)) continue;
-            contacts.push({
+            if (refHits.some((x) => x.userName === un)) continue;
+            refHits.push({
               ...c,
               inSpace: false,
               labelOnly: true,
-              hint: '僅標籤・不提醒'
+              hint: '僅參考・不提醒'
             });
-            if (contacts.length >= 10) break;
+            if (refHits.length >= 8) break;
           }
-        }
-      } else {
-        // 私人：通訊錄搜尋
-        if (q) {
-          const res = await window.api.gchatSearch?.({ query: q });
-          if (mentionQuery !== query) return;
-          contacts = (res?.contacts || []).map((c) => ({ ...c, inSpace: true }));
-        }
-        const seen = new Set(contacts.map((c) => c.userName));
-        const thread = Array.isArray(window.__popThreadCache) ? window.__popThreadCache : [];
-        for (const m of thread) {
-          const un = String(m?.senderName || '').trim();
-          const label = String(m?.sender || '').trim();
-          if (!un || seen.has(un) || m?.isMine) continue;
-          if (q && !`${label} ${un}`.toLowerCase().includes(q.toLowerCase())) continue;
-          seen.add(un);
-          contacts.push({
-            kind: 'contact',
-            userName: un,
-            label: label || un,
-            hint: '此對話',
-            iconUrl: m.iconUrl || '',
-            inSpace: true
+          paintMentionSuggestParts({
+            partitioned: true,
+            membersLoading: false,
+            memberHits,
+            refHits
           });
-          if (contacts.length >= 8) break;
+          return;
         }
+
+        const members = spaceMembersCache.get(spaceName) || [];
+        const memberHits = buildGroupMemberHits(members, q);
+        let refHits = [];
+        if (q) {
+          refHits = await buildGroupRefHits(members, q);
+          if (mentionQuery !== query) return;
+        }
+        paintMentionSuggestParts({
+          partitioned: true,
+          membersLoading: false,
+          memberHits,
+          refHits
+        });
+        return;
       }
 
-      // @all（群組較有意義；私人也允許）
-      if (!q || 'all'.startsWith(q.toLowerCase()) || '全部'.startsWith(q)) {
-        contacts.unshift({
+      // 私人：通訊錄／此對話（平坦列表；皆當可提醒對象）
+      let contacts = [];
+      if (q) {
+        const res = await window.api.gchatSearch?.({ query: q });
+        if (mentionQuery !== query) return;
+        contacts = (res?.contacts || []).map((c) => ({ ...c, inSpace: true }));
+      }
+      const seen = new Set(contacts.map((c) => c.userName));
+      const thread = Array.isArray(window.__popThreadCache) ? window.__popThreadCache : [];
+      for (const m of thread) {
+        const un = String(m?.senderName || '').trim();
+        const label = String(m?.sender || '').trim();
+        if (!un || seen.has(un) || m?.isMine) continue;
+        if (q && !`${label} ${un}`.toLowerCase().includes(q.toLowerCase())) continue;
+        seen.add(un);
+        contacts.push({
           kind: 'contact',
-          userName: 'users/all',
-          label: '全部成員',
-          hint: '@all',
-          iconUrl: '',
+          userName: un,
+          label: label || un,
+          hint: '此對話',
+          iconUrl: m.iconUrl || '',
           inSpace: true
         });
+        if (contacts.length >= 8) break;
       }
+      if (shouldIncludeAllMention(q)) contacts.unshift(buildAllMentionHit());
       paintMentionSuggest(contacts.slice(0, 10));
     }
 
@@ -420,7 +547,14 @@
       if (tryDeleteAdjacentMention(e)) return;
 
       const box = document.getElementById('mention-suggest');
-      if (!box || box.hidden || !mentionHits.length) return;
+      if (!box || box.hidden) return;
+      if (!mentionHits.length) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideMentionSuggest();
+        }
+        return;
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         mentionActive = (mentionActive + 1) % mentionHits.length;

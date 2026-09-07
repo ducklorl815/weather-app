@@ -34,6 +34,13 @@ function registerUiHandlers(ipcMain, deps) {
     } catch (err) {
       console.warn('泡泡開啟標已讀失敗:', err.message);
     }
+    // ADR-0005：Toast 與 Bar 同一套 Alert Anchor 落地
+    if (typeof ui.openFromAlertAnchor === 'function') {
+      return ui.openFromAlertAnchor(messageName, {
+        skipMarkRead: true,
+        readUntil: readUntilBeforeOpen
+      });
+    }
     return ui.openCompactReply(messageName, { skipMarkRead: true, readUntil: readUntilBeforeOpen });
   });
 

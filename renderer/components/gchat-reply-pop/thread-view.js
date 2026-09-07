@@ -989,9 +989,12 @@
     }
 
     function buildFocusBarTitle(contact, rootText) {
-      const c = String(contact || '').trim() || '對話';
+      const c = String(contact || '').trim()
+        .replace(/^★\s*/, '')
+        .split(/★|·/)[0]
+        .trim() || '對話';
       const r = snippetForFocusTitle(rootText);
-      return r ? `${c}★${r}` : `${c}★討論串`;
+      return r ? `${c} · ${r}` : `${c} · 討論串`;
     }
 
     async function openFocusThread(messageName, threadName, clickedText = '') {

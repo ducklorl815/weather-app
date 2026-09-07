@@ -17,3 +17,8 @@
 
 ## [Important]
 修改 `view.html` 內的 DOM id 時，必須同步檢查 `logic.js` 與 `main` IPC。
+
+## 編號（列號）
+- 領域用語見根目錄 `CONTEXT.md`（**編號** = 試算表原生列號，UI 寫成 `#N`）。
+- 資料來源：Main `parseSheetRows` 的 `rowNumber`。
+- 顯示：主列表標題上方、編輯 modal 標題上方（`app.js` `renderSheetsList` / `showSheetRowModal`）。

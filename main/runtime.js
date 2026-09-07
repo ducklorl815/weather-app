@@ -1964,10 +1964,10 @@ async function minimizeReplyPop(messageNameOrEntry, title = '') {
   seedReplyPopWatchCursor(entry);
   // [Important] 專注串標題不可被 pickGchatBubbleTitle 洗成只有聯絡人
   if (entry.threadFocus) {
-    if (title && String(title).includes('★')) {
-      const parts = String(title).split('★');
-      entry.contactTitle = entry.contactTitle || parts[0].trim();
-      if (parts[1]) entry.focusRootText = parts.slice(1).join('★').trim();
+    if (title && (String(title).includes('★') || String(title).includes('·'))) {
+      const parsed = parseFocusThreadBarTitle(title);
+      entry.contactTitle = entry.contactTitle || parsed.contactTitle;
+      if (parsed.focusRootText) entry.focusRootText = parsed.focusRootText;
     }
     refreshFocusEntryTitle(entry);
   } else {
@@ -2021,6 +2021,7 @@ async function restoreReplyPop(messageNameOrEntry) {
 
   const focusOpen = resolveUnreadFocusThreadOpen(entry);
   if (focusOpen) {
+    const anchorName = String(focusOpen.openMessageName || focusOpen.messageName || '').trim();
     entry.minimized = false;
     entry.unreadBadge = 0;
     clearReplyPopOpenTarget(entry);
@@ -2034,10 +2035,13 @@ async function restoreReplyPop(messageNameOrEntry) {
       focusRootText: focusOpen.focusRootText,
       title: entry.contactTitle || entry.title,
       isDm: !!entry.isDm,
-      readUntil: scrollReadUntil
+      readUntil: scrollReadUntil,
+      jumpToMessage: true,
+      jumpMessageName: anchorName
     });
   }
 
+  const restoreJumpName = String(entry.pendingOpenMessageName || '').trim();
   entry.minimized = false;
   entry.unreadBadge = 0;
   // [Important] 展開泡泡時 bar 仍留在右下角
@@ -2113,6 +2117,8 @@ async function restoreReplyPop(messageNameOrEntry) {
         }
       }
     } catch (_) {}
+    // 還原前保留 jump，供 query／scroll-open；load 後再清
+    if (restoreJumpName) entry.pendingOpenMessageName = restoreJumpName;
     await bubble.loadFile(path.join(APP_ROOT, 'gchat-reply-pop.html'), {
       query: {
         name: openName,
@@ -2121,7 +2127,8 @@ async function restoreReplyPop(messageNameOrEntry) {
         focusRootText: entry.threadFocus ? (entry.focusRootText || '') : '',
         contactTitle: entry.threadFocus ? (entry.contactTitle || '') : '',
         rootMessageName: entry.threadFocus ? (entry.rootMessageName || '') : '',
-        readUntil: entry.pendingOpenReadUntil || scrollReadUntil
+        readUntil: entry.pendingOpenReadUntil || scrollReadUntil,
+        jumpTo: restoreJumpName || ''
       }
     });
     entry.pendingOpenReadUntil = '';
@@ -2223,17 +2230,42 @@ async function closeReplyPopCompletely(convKeyOrEntry) {
   return { success: true, removed: !!entry };
 }
 
-/** 專注討論串標題：王婷薇3014★讓我們乘著陽光 */
+/** 專注討論串標題：{群組名} · {根訊息摘要} */
 function formatFocusThreadBarTitle(contactTitle, rootText) {
   const contact = String(contactTitle || '').trim()
     .replace(/^★\s*/, '')
-    .split('★')[0]
+    .split(/★|·/)[0]
     .trim() || '對話';
   let root = String(rootText || '').replace(/\s+/g, ' ').trim();
-  // 若誤傳整段「聯絡人★根訊息」，只留 ★ 後面
+  // 若誤傳整段「聯絡人★／·根訊息」，只留分隔後
   if (root.includes('★')) root = root.split('★').slice(1).join('★').trim();
+  if (root.includes('·')) {
+    const parts = root.split('·').map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 1) root = parts.slice(1).join(' · ');
+  }
   if (root.length > 28) root = `${root.slice(0, 28)}…`;
-  return root ? `${contact}★${root}` : `${contact}★討論串`;
+  return root ? `${contact} · ${root}` : `${contact} · 討論串`;
+}
+
+/** 解析舊 ★ 或新 · 格式的專注 bar 標題 */
+function parseFocusThreadBarTitle(rawTitle) {
+  const raw = String(rawTitle || '').trim();
+  if (!raw) return { contactTitle: '', focusRootText: '' };
+  if (raw.includes('★')) {
+    const parts = raw.split('★');
+    return {
+      contactTitle: parts[0].trim(),
+      focusRootText: parts.slice(1).join('★').trim()
+    };
+  }
+  if (raw.includes('·')) {
+    const parts = raw.split('·').map((p) => p.trim()).filter(Boolean);
+    return {
+      contactTitle: parts[0] || '',
+      focusRootText: parts.slice(1).join(' · ')
+    };
+  }
+  return { contactTitle: raw.replace(/^★\s*/, ''), focusRootText: '' };
 }
 
 function refreshFocusEntryTitle(entry) {
@@ -2368,10 +2400,23 @@ async function openCompactGchatReply(messageName, opts = {}) {
     existing.pendingOpenReadUntil = readUntilBeforeOpen;
     ensureReplyEntryIcon(existing);
     syncReplyBarUi(existing);
-    if (opts.jumpToMessage && openName && !focusThread) {
-      existing.pendingOpenMessageName = openName;
-    } else if (focusThread) {
-      existing.pendingOpenMessageName = '';
+    const reuseJumpTarget = String(
+      opts.jumpMessageName || opts.openMessageName || ''
+    ).trim() || (opts.jumpToMessage && openName ? openName : '');
+    if (reuseJumpTarget) {
+      existing.pendingOpenMessageName = reuseJumpTarget;
+      if (!existing.threadFocus && hit) {
+        rememberReplyPopOpenTarget(existing, {
+          ...hit,
+          name: reuseJumpTarget,
+          threadName: hit.threadName || threadName || ''
+        });
+      } else if (existing.threadFocus) {
+        rememberFocusPopOpenTarget(existing, {
+          name: reuseJumpTarget,
+          threadName: threadName || existing.threadName || ''
+        });
+      }
     }
     if (focusThread && threadName) {
       existing.threadFocus = true;
@@ -2472,8 +2517,11 @@ async function openCompactGchatReply(messageName, opts = {}) {
     .replace(/\s+/g, ' ')
     .trim();
   const rootMessageName = String(opts.rootMessageName || (focusThread ? openName : '') || '').trim();
-  const jumpToMessage = !!opts.jumpToMessage && !!openName && !focusThread;
-  // [Important] 專注串標題：王婷薇3014★讓我們乘著陽光
+  // ADR-0005：Focus Thread 也可 jump 到 Alert Anchor（勿因 focusThread 關掉 jump）
+  const jumpTarget = String(opts.jumpMessageName || opts.openMessageName || '').trim()
+    || (opts.jumpToMessage && openName ? openName : '');
+  const jumpToMessage = !!jumpTarget;
+  // [Important] 專注串標題：{群組名} · {根訊息摘要}
   const titleHint = focusThread
     ? formatFocusThreadBarTitle(titleBase, focusRootText)
     : titleBase;
@@ -2498,7 +2546,12 @@ async function openCompactGchatReply(messageName, opts = {}) {
   entry.pendingOpenReadUntil = readUntilBeforeOpen;
   ensureReplyEntryIcon(entry);
   syncReplyPopIcon(entry);
-  if (jumpToMessage) entry.pendingOpenMessageName = openName;
+  if (jumpToMessage) {
+    entry.pendingOpenMessageName = jumpTarget;
+    if (focusThread) {
+      entry.pendingOpenThreadName = threadName || '';
+    }
+  }
   if (focusThread) refreshFocusEntryTitle(entry);
   if (focusThread && /\/threads\//.test(threadName)) {
     entry.apiThreadName = threadName.replace(/^focus:/, '');
@@ -2519,7 +2572,7 @@ async function openCompactGchatReply(messageName, opts = {}) {
       focusRootText: focusThread ? focusRootText : '',
       rootMessageName: focusThread ? rootMessageName : '',
       readUntil: readUntilBeforeOpen || '',
-      jumpTo: jumpToMessage ? openName : '',
+      jumpTo: jumpToMessage ? jumpTarget : '',
       iconUrl: entry.iconUrl || '',
       emoji: entry.emoji || ''
     }
@@ -2744,7 +2797,8 @@ function rememberReplyPopOpenTarget(entry, message) {
 function buildReplyPopScrollOpenPayload(entry, readUntil = '') {
   const payload = { readUntil: String(readUntil || '').trim() };
   const jump = String(entry?.pendingOpenMessageName || '').trim();
-  if (jump && !entry?.threadFocus) payload.jumpMessageName = jump;
+  // ADR-0005：Focus Thread 與一般泡泡都要能 jump 到 Alert Anchor
+  if (jump) payload.jumpMessageName = jump;
   return payload;
 }
 
@@ -2932,7 +2986,84 @@ async function routeThreadUnreadToFocusBar(message, titleHint = '') {
   rememberFocusPopOpenTarget(focusEntry, message);
   await bumpReplyPopUnread(focusEntry, message, '');
   prefetchReplyPopEntryCache(focusEntry, message);
+  // ADR-0005：串內只推 Focus Thread bar；若空間 bar 本來就在，只寫 Anchor 不新建／不加 badge
+  mirrorExistingSpaceBarAlertAnchor(message);
   return focusEntry;
+}
+
+/**
+ * 串內提醒：僅當同空間「一般 bar 已存在」時寫入 Alert Anchor（點群組名 bar 可轉進串）。
+ * [Important] 不新建空間 bar、不累加 badge、不強制把 bar 叫回螢幕。
+ */
+function mirrorExistingSpaceBarAlertAnchor(message) {
+  const spaceName = String(message?.spaceName || '').trim();
+  if (!spaceName || isDirectMessageContext(message)) return null;
+  if (!isMessageInReplyThread(message)) return null;
+
+  const spaceEntry = findReplyPopEntryForSpace(spaceName);
+  if (!spaceEntry || spaceEntry.threadFocus) return null;
+
+  rememberReplyPopOpenTarget(spaceEntry, message);
+  return spaceEntry;
+}
+
+/**
+ * Toast／提醒點開：依 Alert Anchor 落地（串→Focus＋jump；外層／私人→jump）
+ */
+async function openFromAlertAnchor(messageName, opts = {}) {
+  const name = String(messageName || '').trim();
+  if (!name) return { success: false, error: '缺少訊息' };
+
+  let message = (gchatCache.messages || []).find((m) => m.name === name)
+    || findReadyGchatPacket(name)?.detail
+    || (gchatCache.todayTouched || []).find((m) => m.name === name)
+    || null;
+  if (!message) {
+    try {
+      message = await fetchGchatMessageDetail(name);
+    } catch (_) {}
+  }
+  if (!message) {
+    return openCompactGchatReply(name, {
+      jumpToMessage: true,
+      jumpMessageName: name,
+      readUntil: opts.readUntil,
+      skipMarkRead: opts.skipMarkRead,
+      stealFocus: opts.stealFocus
+    });
+  }
+
+  const titleHint = await resolveAlertDisplayTitle(message);
+  if (isMessageInReplyThread(message)) {
+    const focusOpen = resolveFocusThreadFromMessage(message, titleHint);
+    if (focusOpen) {
+      return openCompactGchatReply(focusOpen.messageName, {
+        spaceName: focusOpen.spaceName || message.spaceName,
+        threadName: focusOpen.threadName,
+        focusThread: true,
+        rootMessageName: focusOpen.rootMessageName,
+        focusRootText: focusOpen.focusRootText,
+        title: titleHint,
+        isDm: !!message.isDm,
+        jumpToMessage: true,
+        jumpMessageName: focusOpen.openMessageName || name,
+        readUntil: opts.readUntil,
+        skipMarkRead: opts.skipMarkRead,
+        stealFocus: opts.stealFocus
+      });
+    }
+  }
+
+  return openCompactGchatReply(name, {
+    spaceName: message.spaceName || '',
+    isDm: !!message.isDm || isDirectMessageContext(message),
+    title: titleHint,
+    jumpToMessage: true,
+    jumpMessageName: name,
+    readUntil: opts.readUntil,
+    skipMarkRead: opts.skipMarkRead,
+    stealFocus: opts.stealFocus
+  });
 }
 
 async function bumpReplyPopUnread(entry, message, titleHint = '') {
@@ -3662,6 +3793,11 @@ async function buildThreadRefreshFromCache(detail, cached, { fromCache = true } 
 const mainGchatAlerted = new Set();
 /** trackKey → 上次提醒時的 createTime；僅更新訊息才重跳泡泡 */
 const mainGchatAlertedAt = new Map();
+/**
+ * 置頂群組 Reply Bar Alert 水位（spaceName → createTime）
+ * [Important] 不進 Inbox；只驅動 Bar／Toast。首次只種子、不重放歷史。
+ */
+const pinnedGroupAlertCursors = new Map();
 /** 前端目前正在看的對話（開著 modal 時不要彈 toast） */
 let gchatViewing = null;
 /** 剛回覆過的空間：短暫抑制 toast，避免自己回話又跳提醒 */
@@ -4273,18 +4409,36 @@ function broadcastGchatListUpdate() {
 
 async function notifyNewGchatAlerts() {
   if (loadGchatPrefs().alertPopup === false) return;
-  const messages = (gchatSnapshot().messages || []).filter((m) => isInboxGchatMessage(m) && (m.isDm || m.mentionedMe));
+  const inboxAlerts = (gchatSnapshot().messages || []).filter((m) => isInboxGchatMessage(m) && (m.isDm || m.mentionedMe));
   if (!mainGchatAlertSeeded) {
     // [Important] 以對話（空間）為單位記住；啟動時只種子、不重跳既有未讀
-    messages.forEach(m => {
+    inboxAlerts.forEach(m => {
       const key = gchatTrackKey(m) || m.name;
       if (!key) return;
       mainGchatAlerted.add(key);
       mainGchatAlertedAt.set(key, String(m.createTime || ''));
     });
     mainGchatAlertSeeded = true;
+    await seedPinnedGroupAlertCursors();
     return;
   }
+
+  let pinnedAlerts = [];
+  try {
+    pinnedAlerts = await collectPinnedGroupAlertMessages();
+  } catch (err) {
+    console.warn('[GChat] 置頂群組提醒掃描失敗:', err?.message || err);
+  }
+
+  const byName = new Map();
+  for (const m of [...inboxAlerts, ...pinnedAlerts]) {
+    const name = String(m?.name || '').trim();
+    if (!name || byName.has(name)) continue;
+    byName.set(name, m);
+  }
+  const messages = [...byName.values()];
+  if (!messages.length) return;
+
   const fresh = [];
   const updates = [];
   for (const m of messages) {
@@ -4308,7 +4462,7 @@ async function notifyNewGchatAlerts() {
   }
   if (!fresh.length && !updates.length) return;
 
-  // 泡泡跳出前先打包歷史（私人＋群組 @ 都一樣），點開才能秒回
+  // 泡泡跳出前先打包歷史（私人＋群組 @／置頂都一樣），點開才能秒回
   await Promise.all([...fresh, ...updates].slice(0, 6).map(async (m) => {
     try {
       const full = gchatCache.messages.find(x => x.name === m.name) || m;
@@ -4337,6 +4491,114 @@ async function notifyNewGchatAlerts() {
     }
     showFloatingGchatToast(m);
   }
+}
+
+/**
+ * 列出已置頂的群組 Space（不含私人；私人走 Inbox）
+ */
+function listPinnedGroupSpacesForAlert() {
+  const prefs = loadGchatPrefs();
+  const out = [];
+  const seen = new Set();
+  for (const s of prefs.pinnedSpaces || []) {
+    const spaceName = String(s?.spaceName || '').trim();
+    if (!spaceName || seen.has(spaceName)) continue;
+    if (s?.isDm || String(s?.spaceType || '') === 'DIRECT_MESSAGE') continue;
+    if (isMutedSpaceSetting(gchatCache.spaceMute?.[spaceName])) continue;
+    seen.add(spaceName);
+    out.push(spaceName);
+  }
+  return out;
+}
+
+/** 啟動／重設提醒時：置頂群組只種子水位，不重放歷史 */
+async function seedPinnedGroupAlertCursors() {
+  if (!oauth2Client || !chatService) return;
+  const spaces = listPinnedGroupSpacesForAlert().slice(0, 12);
+  const api = ensureGchatChatApiService();
+  for (const spaceName of spaces) {
+    try {
+      ensurePinnedSpaceUnreadBaseline(spaceName, false);
+      const msgs = await api.listSpaceMessagesRawRetry(spaceName, {
+        pageSize: 1,
+        orderBy: 'createTime desc'
+      });
+      const newestTime = String(msgs[0]?.createTime || '').trim();
+      const baseline = String(gchatLocallyReadSpaces.get(spaceName) || '').trim();
+      const seed = [newestTime, baseline].filter(Boolean).sort().pop() || newestTime;
+      if (seed) pinnedGroupAlertCursors.set(spaceName, seed);
+    } catch (err) {
+      logGchatApiIssue('置頂群組提醒種子', err);
+    }
+  }
+}
+
+/**
+ * 置頂群組未 @／一般新訊 → Reply Bar Alert 候選（不寫入 Inbox）
+ * ADR-0004：Inbox 維持私人／@我；此路徑只餵 notify → Bar／Toast。
+ * 若該空間已有 Reply Pop／Bar，水位仍推進，未讀改由 syncRegistryReplyPopBadges 累加（避免雙重 badge）。
+ */
+async function collectPinnedGroupAlertMessages() {
+  if (!oauth2Client || !chatService) return [];
+  const spaces = listPinnedGroupSpacesForAlert().slice(0, 12);
+  if (!spaces.length) return [];
+
+  const api = ensureGchatChatApiService();
+  const myUserName = gchatCache.myUserName || await ensureMyChatUserName();
+  const out = [];
+
+  for (const spaceName of spaces) {
+    try {
+      const msgs = await api.listSpaceMessagesRawRetry(spaceName, {
+        pageSize: 8,
+        orderBy: 'createTime desc'
+      });
+      if (!msgs.length) continue;
+      const newestTime = String(msgs[0]?.createTime || '').trim();
+      if (!pinnedGroupAlertCursors.has(spaceName)) {
+        ensurePinnedSpaceUnreadBaseline(spaceName, false);
+        const baseline = String(gchatLocallyReadSpaces.get(spaceName) || '').trim();
+        const seed = [newestTime, baseline].filter(Boolean).sort().pop() || newestTime;
+        if (seed) pinnedGroupAlertCursors.set(spaceName, seed);
+        continue;
+      }
+
+      // 已有 bar／泡泡：只推進水位，讓 registry badge 路徑處理
+      if (findReplyPopEntryForSpace(spaceName) || findMinimizedReplyBarForSpace(spaceName)) {
+        if (newestTime) pinnedGroupAlertCursors.set(spaceName, newestTime);
+        continue;
+      }
+
+      const cursor = String(pinnedGroupAlertCursors.get(spaceName) || '');
+      const meta = await ensureSpaceMeta(spaceName);
+      if (meta?.spaceType === 'DIRECT_MESSAGE') {
+        pinnedGroupAlertCursors.set(spaceName, newestTime || cursor);
+        continue;
+      }
+      for (const raw of msgs) {
+        const ct = String(raw?.createTime || '').trim();
+        if (!ct || (cursor && ct <= cursor)) break;
+        if (isOwnChatApiRawMessage(raw)) continue;
+        if (isLocallyReadMessage(raw.name, { spaceName, createTime: ct })) continue;
+
+        const mentionedMe = messageMentionsMe(raw, myUserName);
+        const item = await normalizeChatMessage(raw, meta.label || '');
+        item.spaceType = meta.spaceType || 'SPACE';
+        item.isDm = false;
+        item.mentionedMe = !!mentionedMe;
+        item.spaceDisplayName = meta.label || item.spaceDisplayName || '';
+        item.threadName = String(raw?.thread?.name || item.threadName || '').trim();
+        item.pinnedAlert = true;
+        out.push(item);
+        if (out.length >= 20) break;
+      }
+      if (newestTime) pinnedGroupAlertCursors.set(spaceName, newestTime);
+      if (out.length >= 20) break;
+    } catch (err) {
+      logGchatApiIssue('置頂群組提醒掃描', err);
+    }
+  }
+  return out;
 }
 
 /**
@@ -6739,6 +7001,216 @@ function sitesVisitsStorePath() {
 }
 
 const SITES_VISITS_HEADERS = ['時間', '同仁', '專案', '網站', '秒數', 'SiteID', '點擊數', '超連結數'];
+// [Important] 業務全在台灣：瀏覽時間一律以台北時區存／讀／顯示（避免試算表預設 UTC 差 8 小時）
+const SITES_VISITS_TIMEZONE = 'Asia/Taipei';
+
+function padSitesVisit2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatSitesVisitTimeLabel(ms) {
+  const t = Number(ms) || 0;
+  if (!t) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: SITES_VISITS_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(new Date(t));
+    const map = {};
+    for (const p of parts) map[p.type] = p.value;
+    let hour = Number(map.hour);
+    if (hour === 24) hour = 0;
+    return `${map.year}/${Number(map.month)}/${Number(map.day)} ${padSitesVisit2(hour)}:${map.minute}:${map.second}`;
+  } catch (_) {
+    return new Date(t).toISOString();
+  }
+}
+
+/** 將試算表「牆上時鐘」數字解成 Asia/Taipei 絕對時間 */
+function sitesVisitWallTimeToMs(year, month, day, hour, minute, second) {
+  const iso = `${year}-${padSitesVisit2(month)}-${padSitesVisit2(day)}T${padSitesVisit2(hour)}:${padSitesVisit2(minute)}:${padSitesVisit2(second)}+08:00`;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+async function ensureSitesVisitsSpreadsheetTimezone(spreadsheetId) {
+  if (!sheetsService || !spreadsheetId) return { changed: false };
+  const cfg = loadSitesVisitsConfig();
+  try {
+    const meta = await sheetsService.spreadsheets.get({
+      spreadsheetId,
+      fields: 'properties.timeZone,properties.locale'
+    });
+    const prevTz = String(meta.data?.properties?.timeZone || 'UTC') || 'UTC';
+    const locale = String(meta.data?.properties?.locale || '');
+    const fields = [];
+    const properties = {};
+    if (prevTz !== SITES_VISITS_TIMEZONE) {
+      properties.timeZone = SITES_VISITS_TIMEZONE;
+      fields.push('timeZone');
+    }
+    if (locale !== 'zh_TW') {
+      properties.locale = 'zh_TW';
+      fields.push('locale');
+    }
+    if (fields.length) {
+      await sheetsService.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            updateSpreadsheetProperties: {
+              properties,
+              fields: fields.join(',')
+            }
+          }]
+        }
+      });
+    }
+    // 歷史修正只做一次：舊時區牆上時鐘 → 台北；若已標台北仍可能是未換算的 UTC 值
+    if (!cfg.logTimezoneNormalized) {
+      const fromTz = prevTz === SITES_VISITS_TIMEZONE ? 'UTC' : prevTz;
+      await shiftSitesVisitsSheetTimesToTaipei(spreadsheetId, fromTz);
+      cfg.logTimezoneNormalized = true;
+      saveSitesVisitsConfig(cfg);
+    }
+    return { changed: true, prevTz };
+  } catch (_) {
+    return { changed: false };
+  }
+}
+
+/** 依舊時區與台北的偏移，把時間欄 Date 序號改寫成台北牆上時鐘 */
+async function shiftSitesVisitsSheetTimesToTaipei(spreadsheetId, prevTz) {
+  if (!sheetsService || !spreadsheetId) return;
+  const cfg = loadSitesVisitsConfig();
+  const sheetName = cfg.logSheetName || '瀏覽紀錄';
+  const res = await sheetsService.spreadsheets.values.get({
+    spreadsheetId,
+    range: quoteSheetRange(sheetName, 'A2:A'),
+    valueRenderOption: 'UNFORMATTED_VALUE'
+  });
+  const rows = res.data.values || [];
+  if (!rows.length) return;
+  const out = [];
+  let changed = 0;
+  for (const row of rows) {
+    const raw = row[0];
+    if (raw == null || raw === '') {
+      out.push(['']);
+      continue;
+    }
+    let absoluteMs = 0;
+    if (typeof raw === 'number' && raw > 20000 && raw < 200000) {
+      absoluteMs = sheetSerialAsTimezoneToMs(raw, prevTz);
+    } else {
+      absoluteMs = parseWallTimeInTimezone(String(raw), prevTz);
+    }
+    if (!absoluteMs) {
+      out.push([raw]);
+      continue;
+    }
+    const label = formatSitesVisitTimeLabel(absoluteMs);
+    out.push([label]);
+    changed += 1;
+  }
+  if (!changed) return;
+  await sheetsService.spreadsheets.values.update({
+    spreadsheetId,
+    range: quoteSheetRange(sheetName, `A2:A${rows.length + 1}`),
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: out }
+  });
+}
+
+function tzOffsetMsAt(ms, timeZone) {
+  const d = new Date(ms);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'shortOffset',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(d);
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  const name = String(map.timeZoneName || 'GMT');
+  const m = name.match(/([+-])(\d{1,2})(?::?(\d{2}))?/);
+  if (!m) return 0;
+  const sign = m[1] === '-' ? -1 : 1;
+  return sign * (Number(m[2]) * 3600000 + Number(m[3] || 0) * 60000);
+}
+
+function sheetSerialAsTimezoneToMs(serial, timeZone) {
+  const wholeDays = Math.floor(serial);
+  let millis = Math.round((serial - wholeDays) * 86400000);
+  let dayOffset = wholeDays;
+  if (millis >= 86400000) {
+    millis -= 86400000;
+    dayOffset += 1;
+  } else if (millis < 0) {
+    millis += 86400000;
+    dayOffset -= 1;
+  }
+  const base = new Date(Date.UTC(1899, 11, 30) + dayOffset * 86400000);
+  const y = base.getUTCFullYear();
+  const mo = base.getUTCMonth() + 1;
+  const d = base.getUTCDate();
+  const h = Math.floor(millis / 3600000);
+  const mi = Math.floor((millis % 3600000) / 60000);
+  const s = Math.floor((millis % 60000) / 1000);
+  // 先當 UTC 牆上，再扣掉該時區相對 UTC 的偏移 → 絕對時間
+  const asUtc = Date.UTC(y, mo - 1, d, h, mi, s);
+  const guess = asUtc;
+  const off = tzOffsetMsAt(guess, timeZone);
+  return asUtc - off;
+}
+
+function absoluteMsToSheetSerialInTimezone(ms, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date(ms));
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  let hour = Number(map.hour);
+  if (hour === 24) hour = 0; // 少數環境 24:00
+  const y = Number(map.year);
+  const mo = Number(map.month);
+  const d = Number(map.day);
+  const mi = Number(map.minute);
+  const s = Number(map.second);
+  const utcWall = Date.UTC(y, mo - 1, d, hour, mi, s);
+  return (utcWall - Date.UTC(1899, 11, 30)) / 86400000;
+}
+
+function parseWallTimeInTimezone(text, timeZone) {
+  const m = String(text || '').trim().match(
+    /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\s*(上午|下午|AM|PM)?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/i
+  );
+  if (!m) return 0;
+  let hour = Number(m[5]);
+  const ap = String(m[4] || '').toLowerCase();
+  if ((ap === '下午' || ap === 'pm') && hour < 12) hour += 12;
+  if ((ap === '上午' || ap === 'am') && hour === 12) hour = 0;
+  const asUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hour, Number(m[6]), Number(m[7] || 0));
+  return asUtc - tzOffsetMsAt(asUtc, timeZone);
+}
 
 function loadSitesVisitsConfig() {
   try {
@@ -6750,7 +7222,9 @@ function loadSitesVisitsConfig() {
         deployWebAppUrl: String(data.deployWebAppUrl || ''),
         projects: Array.isArray(data.projects) ? data.projects : [],
         erpConnectionString: String(data.erpConnectionString || '').trim(),
-        columnPrefs: sitesVisitsEnrich.normalizeColumnPrefs(data.columnPrefs)
+        columnPrefs: sitesVisitsEnrich.normalizeColumnPrefs(data.columnPrefs),
+        // [Important] 歷史時間是否已換算成台北（只做一次，避免重複 +8）
+        logTimezoneNormalized: !!data.logTimezoneNormalized
       };
     }
   } catch (_) {}
@@ -6760,7 +7234,8 @@ function loadSitesVisitsConfig() {
     deployWebAppUrl: '',
     projects: [],
     erpConnectionString: '',
-    columnPrefs: sitesVisitsEnrich.defaultColumnPrefs()
+    columnPrefs: sitesVisitsEnrich.defaultColumnPrefs(),
+    logTimezoneNormalized: false
   };
 }
 
@@ -6776,7 +7251,10 @@ function saveSitesVisitsConfig(cfg) {
       : String(cfg.erpConnectionString || '').trim(),
     columnPrefs: cfg.columnPrefs === undefined
       ? current.columnPrefs
-      : sitesVisitsEnrich.normalizeColumnPrefs(cfg.columnPrefs)
+      : sitesVisitsEnrich.normalizeColumnPrefs(cfg.columnPrefs),
+    logTimezoneNormalized: cfg.logTimezoneNormalized === undefined
+      ? !!current.logTimezoneNormalized
+      : !!cfg.logTimezoneNormalized
   }, null, 2));
 }
 
@@ -6948,11 +7426,25 @@ function sitesVisitsTrackerScript(cfg) {
  * 權限：執行身分＝我；誰可以存取＝網域內的所有人
  * 改碼後務必：管理部署 → 編輯 → 新版本
  *
+ * ★ 時區：試算表強制 Asia/Taipei（台北），避免出現凌晨 1～7 點的錯位
  * ★ 若同仁看到「LOG_SHEET_ID 未設定」：把下面這行改成 LifeTour 設定頁顯示的試算表 ID
  */
 var LOG_SHEET_ID = '${sheetId}';
 var LOG_SHEET_NAME = '瀏覽紀錄';
+var LOG_TIMEZONE = 'Asia/Taipei';
 var PROJECTS = ${JSON.stringify(list, null, 2)};
+
+function ensureTaipeiTimezone_(ss) {
+  try {
+    if (ss.getSpreadsheetTimeZone() !== LOG_TIMEZONE) {
+      ss.setSpreadsheetTimeZone(LOG_TIMEZONE);
+    }
+  } catch (eTz) {}
+}
+
+function nowForLog_() {
+  return new Date();
+}
 
 function getLogSheetId_() {
   var id = String(LOG_SHEET_ID || '').trim();
@@ -7175,7 +7667,7 @@ function findSessionRow_(sh, sid, projectName, person, now, SESSION_MS) {
 }
 
 function touchSession_(sh, row, person) {
-  sh.getRange(row, 1).setValue(new Date());
+  sh.getRange(row, 1).setValue(nowForLog_());
   if (person && person !== '未知同仁') {
     var cur = String(sh.getRange(row, 2).getValue() || '');
     if (!cur || cur === '未知同仁') sh.getRange(row, 2).setValue(person);
@@ -7190,6 +7682,7 @@ function logVisit(siteId, seconds, kind, label) {
   try {
     var sheetIdResolved = getLogSheetId_();
     var ss = SpreadsheetApp.openById(sheetIdResolved);
+    ensureTaipeiTimezone_(ss);
     var sh = ss.getSheetByName(LOG_SHEET_NAME) || ss.insertSheet(LOG_SHEET_NAME);
     ensureHeader_(sh);
     var user = '';
@@ -7226,7 +7719,7 @@ function logVisit(siteId, seconds, kind, label) {
         if (sid) cache.put(openCacheKey, '1', 90);
         return;
       }
-      sh.appendRow([new Date(), person, projectName, siteUrl, 0, sid, 0, 0]);
+      sh.appendRow([nowForLog_(), person, projectName, siteUrl, 0, sid, 0, 0]);
       if (sid) cache.put(openCacheKey, '1', 90);
       return;
     }
@@ -7240,7 +7733,7 @@ function logVisit(siteId, seconds, kind, label) {
         sh.getRange(row, 7).setValue(prevClicks + 1);
         return;
       }
-      sh.appendRow([new Date(), person, projectName, siteUrl, 0, sid, 1, 0]);
+      sh.appendRow([nowForLog_(), person, projectName, siteUrl, 0, sid, 1, 0]);
       return;
     }
 
@@ -7251,7 +7744,7 @@ function logVisit(siteId, seconds, kind, label) {
         sh.getRange(row, 8).setValue(prevLinks + 1);
         return;
       }
-      sh.appendRow([new Date(), person, projectName, siteUrl, 0, sid, 0, 1]);
+      sh.appendRow([nowForLog_(), person, projectName, siteUrl, 0, sid, 0, 1]);
       return;
     }
 
@@ -7323,13 +7816,37 @@ function formatDurationLabel(totalSec) {
 function parseSheetTime(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
   if (typeof value === 'number' && Number.isFinite(value)) {
-    if (value > 20000 && value < 200000) return Date.UTC(1899, 11, 30) + value * 86400000;
+    // Sheets 序號＝試算表牆上時鐘；一律當台北解（勿用 Date.UTC 當絕對時間）
+    if (value > 20000 && value < 200000) {
+      const wholeDays = Math.floor(value);
+      let millis = Math.round((value - wholeDays) * 86400000);
+      let dayOffset = wholeDays;
+      if (millis >= 86400000) {
+        millis -= 86400000;
+        dayOffset += 1;
+      } else if (millis < 0) {
+        millis += 86400000;
+        dayOffset -= 1;
+      }
+      const base = new Date(Date.UTC(1899, 11, 30) + dayOffset * 86400000);
+      return sitesVisitWallTimeToMs(
+        base.getUTCFullYear(),
+        base.getUTCMonth() + 1,
+        base.getUTCDate(),
+        Math.floor(millis / 3600000),
+        Math.floor((millis % 3600000) / 60000),
+        Math.floor((millis % 60000) / 1000)
+      );
+    }
     if (value > 1e11) return value;
   }
   const text = String(value || '').trim();
   if (!text) return 0;
-  const iso = Date.parse(text);
-  if (!Number.isNaN(iso)) return iso;
+  // 帶明確 offset／Z 的 ISO 直接用
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
+    const iso = Date.parse(text);
+    if (!Number.isNaN(iso)) return iso;
+  }
   const m = text.match(
     /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\s*(上午|下午|AM|PM)?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/i
   );
@@ -7338,17 +7855,29 @@ function parseSheetTime(value) {
     const ap = String(m[4] || '').toLowerCase();
     if ((ap === '下午' || ap === 'pm') && hour < 12) hour += 12;
     if ((ap === '上午' || ap === 'am') && hour === 12) hour = 0;
-    return new Date(
+    return sitesVisitWallTimeToMs(
       Number(m[1]),
-      Number(m[2]) - 1,
+      Number(m[2]),
       Number(m[3]),
       hour,
       Number(m[6]),
       Number(m[7] || 0)
-    ).getTime();
+    );
   }
   const d = text.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
-  if (d) return new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3])).getTime();
+  if (d) return sitesVisitWallTimeToMs(Number(d[1]), Number(d[2]), Number(d[3]), 0, 0, 0);
+  // 無 offset 的字串：勿讓主機時區左右結果，改當台北
+  const loose = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (loose) {
+    return sitesVisitWallTimeToMs(
+      Number(loose[1]),
+      Number(loose[2]),
+      Number(loose[3]),
+      Number(loose[4]),
+      Number(loose[5]),
+      Number(loose[6] || 0)
+    );
+  }
   return 0;
 }
 
@@ -7515,7 +8044,7 @@ function aggregateSitesVisits(events, projects) {
       clicks: interactionClicks,
       links: linkClicks,
       totalSeconds,
-      lastAt,
+      lastAt: formatSitesVisitTimeLabel(lastAtMs) || lastAt,
       lastAtMs,
       durationLabel: formatDurationLabel(totalSeconds)
     });
@@ -7539,6 +8068,7 @@ function mergeSitesVisitEvents(localEvents, incoming) {
 async function ensureSitesVisitsLogSheet(cfg) {
   if (!sheetsService) throw new Error('請先用 Google 登入');
   if (!cfg.logSpreadsheetId) throw new Error('尚未建立 App 紀錄庫');
+  await ensureSitesVisitsSpreadsheetTimezone(cfg.logSpreadsheetId);
   const sheetName = cfg.logSheetName || '瀏覽紀錄';
   const range = quoteSheetRange(sheetName, 'A1:H1');
   const res = await sheetsService.spreadsheets.values.get({
@@ -7581,12 +8111,17 @@ async function ensureSitesVisitsBackend(cfg) {
   }
   const created = await sheetsService.spreadsheets.create({
     requestBody: {
-      properties: { title: `LifeTour 網站瀏覽紀錄 ${new Date().toISOString().slice(0, 10)}` },
+      properties: {
+        title: `LifeTour 網站瀏覽紀錄 ${new Date().toISOString().slice(0, 10)}`,
+        timeZone: SITES_VISITS_TIMEZONE,
+        locale: 'zh_TW'
+      },
       sheets: [{ properties: { title: '瀏覽紀錄' } }]
     }
   });
   cfg.logSpreadsheetId = created.data.spreadsheetId;
   cfg.logSheetName = '瀏覽紀錄';
+  cfg.logTimezoneNormalized = true;
   await sheetsService.spreadsheets.values.update({
     spreadsheetId: cfg.logSpreadsheetId,
     range: quoteSheetRange('瀏覽紀錄', 'A1:H1'),
@@ -7625,7 +8160,7 @@ async function fetchSitesVisitsEventsFromSheet(cfg) {
       project: project || '未命名專案',
       site,
       siteId,
-      time: String(timeRaw || ''),
+      time: formatSitesVisitTimeLabel(timeMs) || String(timeRaw || ''),
       timeMs,
       seconds,
       clicks,
@@ -7667,7 +8202,10 @@ function writeSitesVisitIntoApp(ev) {
     project: ev.project || '未命名專案',
     site: ev.site || '',
     siteId: ev.siteId || '',
-    time: ev.time || new Date().toLocaleString('zh-TW', { hour12: false }),
+    time: ev.time || formatSitesVisitTimeLabel(Date.now()) || new Date().toLocaleString('zh-TW', {
+      timeZone: SITES_VISITS_TIMEZONE,
+      hour12: false
+    }),
     timeMs: ev.timeMs || Date.now(),
     seconds: Math.max(0, Number(ev.seconds) || 0),
     clicks: Math.max(0, Number(ev.clicks) || 0),
@@ -12273,12 +12811,10 @@ function applyGchatCompactTitle(fromWin, payload) {
     if (entry.threadFocus) {
       if (payload.focusRootText) entry.focusRootText = String(payload.focusRootText).trim();
       if (payload.contactTitle) entry.contactTitle = String(payload.contactTitle).trim();
-      if (rawTitle.includes('★')) {
-        const parts = rawTitle.split('★');
-        if (parts[0].trim()) entry.contactTitle = parts[0].trim();
-        if (parts.slice(1).join('★').trim()) {
-          entry.focusRootText = parts.slice(1).join('★').trim();
-        }
+      if (rawTitle.includes('★') || rawTitle.includes('·')) {
+        const parsed = parseFocusThreadBarTitle(rawTitle);
+        if (parsed.contactTitle) entry.contactTitle = parsed.contactTitle;
+        if (parsed.focusRootText) entry.focusRootText = parsed.focusRootText;
       } else if (!entry.contactTitle) {
         entry.contactTitle = rawTitle;
       }
@@ -12286,7 +12822,8 @@ function applyGchatCompactTitle(fromWin, payload) {
       syncReplyBarUi(entry);
       return { success: true };
     }
-    const body = rawTitle.includes('★') ? rawTitle.split('★')[0].trim() : rawTitle.replace(/^★\s*/, '');
+    const parsedBody = parseFocusThreadBarTitle(rawTitle);
+    const body = parsedBody.contactTitle || rawTitle.replace(/^★\s*/, '');
     const next = pickGchatBubbleTitle({
       isDm: entry.isDm,
       spaceDisplayName: body,
@@ -12329,6 +12866,7 @@ function createGchatIpcDeps() {
         mainGchatAlertSeeded = false;
         mainGchatAlerted.clear();
         mainGchatAlertedAt.clear();
+        pinnedGroupAlertCursors.clear();
       }
       startGchatSyncScheduler();
     },
@@ -12516,6 +13054,7 @@ function createGchatIpcDeps() {
       snapshotReadUntilBeforeOpen,
       snapshotReadUntilForMessage,
       openCompactReply: openCompactGchatReply,
+      openFromAlertAnchor,
       getWindowFromEvent: (event) => BrowserWindow.fromWebContents(event.sender),
       getMainWindow: () => win,
       findReplyEntry: findReplyPopEntry,
@@ -12576,6 +13115,7 @@ function createGchatIpcDeps() {
           mainGchatAlertSeeded = false;
           mainGchatAlerted.clear();
           mainGchatAlertedAt.clear();
+          pinnedGroupAlertCursors.clear();
         } else if (toastWin && !toastWin.isDestroyed()) {
           toastWin.hide();
         }

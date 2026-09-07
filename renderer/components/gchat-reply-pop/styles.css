@@ -1438,7 +1438,7 @@
       left: 12px;
       right: 12px;
       bottom: calc(100% - 4px);
-      max-height: 180px;
+      max-height: 240px;
       overflow-y: auto;
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -1446,6 +1446,25 @@
       box-shadow: 0 8px 24px rgba(0,0,0,0.28);
       z-index: 40;
       padding: 4px;
+    }
+    .mention-suggest-section-title {
+      padding: 6px 10px 4px;
+      font-size: 0.72em;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      color: var(--text-sub);
+      text-transform: none;
+      user-select: none;
+    }
+    .mention-suggest-section-title + .mention-suggest-section-title {
+      margin-top: 2px;
+    }
+    .mention-suggest-loading,
+    .mention-suggest-empty {
+      padding: 6px 10px 8px;
+      font-size: 0.8em;
+      color: var(--text-sub);
+      user-select: none;
     }
     .mention-suggest-item {
       display: flex;

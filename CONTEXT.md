@@ -1,6 +1,6 @@
 # LifeTour
 
-Desktop productivity hub that integrates Google workspace features and internal tools. This glossary covers product language for the app. Active design work spans Little Reply and Google authorization / session.
+Desktop productivity hub that integrates Google workspace features and internal tools. This glossary covers product language for the app. Active design work spans Little Reply (Reply Bar／Toast 提醒、@ 真提及／僅參考標籤), Google authorization / session, and 9527 Sheets Inbox.
 
 ## Language
 
@@ -57,20 +57,40 @@ The technical prefix for Little Reply's code, IPC channels, and `main/modules/gc
 _Avoid_: using gchat in UI copy or product docs aimed at end users
 
 **Inbox**:
-The Mosaic tile list of Little Reply conversations the user should act on (unread and/or @mentions), not the full Google Chat history.
-_Avoid_: Message List (as the canonical name), gchat-list (IPC only)
+The Mosaic tile list of Little Reply conversations the user should act on: primarily unread DMs and @mentions. It is **not** the full Google Chat history, and it does **not** list every unread message from a Pinned Space that did not @ the user.
+_Avoid_: Message List (as the canonical name), gchat-list (IPC only); treating Inbox as the only place pinned activity appears
 
 **Reply Pop**:
 The dedicated BrowserWindow for reading a thread and sending a reply.
 _Avoid_: compact window, bubble window, 精簡窗 (as the canonical English term); "bubble" when meaning the window (message bubbles in the thread UI are different)
 
 **Reply Bar**:
-The minimized strip window that stands in for a Reply Pop when the user collapses it.
-_Avoid_: taskbar substitute, mini player
+The minimized strip at the corner of the screen that stands in for a Reply Pop: a lasting shortcut with an unread badge. Creating or updating a Reply Bar (and its badge) is the primary “remind me” surface for priority activity. Also called 最小 bar in product talk.
+_Avoid_: taskbar substitute, mini player; calling Toast a Reply Bar
 
 **Toast**:
-The floating desktop alert for new Little Reply activity that can open a Reply Pop.
-_Avoid_: notification (alone — OS notifications may differ), alert popup
+The short-lived floating desktop alert for new Little Reply activity that can open a Reply Pop. Toast may fire for the same priority events as Reply Bar, but existing suppress／dedupe rules still apply (e.g. already viewing that conversation; often badge-only when a bar already exists).
+_Avoid_: notification (alone — OS notifications may differ), alert popup; using “Toast” when you mean the lasting Reply Bar
+
+**Reply Bar Alert**:
+An event that should create a Reply Bar if none exists for that conversation target, or increment its badge if one exists: (1) any new message from others in a Pinned Space or pinned DM, (2) any DM, (3) a group message that @mentions me. Inbox membership is separate from Reply Bar Alert eligibility.
+_Avoid_: conflating Alert with Inbox rows; “notification” alone
+
+**Pinned Space**:
+A Space or DM the user starred for watching. Unreads from a Pinned Space can drive Reply Bar／Toast even when they do not appear as Inbox rows (group traffic without @me).
+_Avoid_: favorite (as canonical), pin chip (UI only)
+
+**Space-level message**:
+A group message that is not inside an API reply Thread (the “outer” space timeline). A Reply Bar Alert for it uses a normal (non–Focus Thread) Reply Bar titled with the Space display name.
+_Avoid_: channel root, main chat (as canonical)
+
+**Focus Thread**:
+A Reply Pop／Reply Bar mode locked to one reply Thread in a group Space. When an @mention (or other Alert) lands in a Thread, the Reminder uses Focus Thread: bar title `{Space name} · {root snippet}`.
+_Avoid_: 專注討論串 as a separate product from Focus Thread; opening the whole Space when the Alert was in-thread
+
+**Alert Anchor**:
+The concrete message (and its Thread, if any) that caused the latest Reply Bar Alert／Toast for a conversation target. Opening from Bar or Toast must land on this message when possible: Thread → Focus Thread Pop scrolled to the Anchor; Space-level → space Pop jumped to the Anchor (else firstUnread, else bottom). For in-thread Alerts, only a Focus Thread Reply Bar is created or badged—do not spawn a second space-level bar for the same Alert.
+_Avoid_: “open the space” without an Anchor; treating badge count alone as enough to find the unread; mirroring every Thread Alert onto a new space-level bar
 
 **Space**:
 A Google Chat room or DM container identified by a space name; Little Reply opens threads inside a Space.
@@ -85,7 +105,7 @@ The cached Thread detail payload for a Space/Thread key (messages plus metadata)
 _Avoid_: snapshot (when you mean Packet), cache (alone — Inbox list cache is separate)
 
 **Failed Optimistic Reply**:
-A Reply Pop composer send that showed a local "me" bubble before the server accepted it; on failure the bubble stays visible, marked unsent, and can be retried.
+A Reply Pop composer send that showed a local “me” bubble before the server accepted it; on failure the bubble stays visible, marked unsent, and can be retried.
 _Avoid_: phantom message, fake bubble (as canonical terms)
 
 **Cache Push**:
@@ -99,3 +119,21 @@ _Avoid_: dual dedupe, renderer-local alert memory (as the source of truth)
 **Behavior Catalog**:
 A post-change document of Little Reply's user-visible behavior and the logic behind it at `docs/little-reply/behavior-catalog.md`; main paths are detailed, other A+B+C surfaces are summarized. Architecture inventory lag is tracked in `docs/architecture/15-little-reply-doc-delta.md`.
 _Avoid_: treating `docs/architecture/00–14` inventory notes as the behavior source of truth after phase 1
+
+**真提及**:
+In a group Space, an @ of a person who is a member of that Space. Sending it notifies them (Chat user-mention). UI chip is solid / accent.
+_Avoid_: @ tag（含糊）, mention（未區分是否在群組）
+
+**僅參考標籤**:
+In a group Space, an @-shaped label for someone who is **not** in that Space. It is reference text only: looks like `@名字`, does **not** notify and must **not** invite them into the Space. UI chip is dashed / muted.
+_Avoid_: 假 @, 無效 mention（易誤解成錯誤）；邀請（禁止由此路徑發生）
+
+### 9527 Sheets Inbox
+
+**9527**:
+The LifeTour mosaic feature that shows an inbox of rows from the locked Google Spreadsheet used for IT request / issue tickets.
+_Avoid_: Sheets (alone as the product name), Google Sheets inbox (as the in-app feature name)
+
+**編號**:
+The Google Sheets native 1-based row number of a ticket row. In the UI it is written as `#N` (for example `#8`). It identifies the row inside a sheet tab; it is not the filtered list position and not an API request serial.
+_Avoid_: list index, 陣列 index, RequestNo / `9527-000…`（unless explicitly talking about the external API serial）

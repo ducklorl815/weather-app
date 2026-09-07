@@ -45,8 +45,8 @@ x64:
     - icon.png
 nsis:
   script: |-
-    !include "C:\Users\ducklorl815\Desktop\weather-app\node_modules\app-builder-lib\templates\nsis\include\StdUtils.nsh"
-    !addincludedir "C:\Users\ducklorl815\Desktop\weather-app\node_modules\app-builder-lib\templates\nsis\include"
+    !include "D:\Project\weather-app\node_modules\app-builder-lib\templates\nsis\include\StdUtils.nsh"
+    !addincludedir "D:\Project\weather-app\node_modules\app-builder-lib\templates\nsis\include"
     !macro _isUpdated _a _b _t _f
       ${StdUtils.TestParameter} $R9 "updated"
       StrCmp "$R9" "true" `${_t}` `${_f}`
@@ -118,8 +118,8 @@ nsis:
       !insertmacro MUI_LANGUAGE "Vietnamese"
     !macroend
 
-    !include "C:\Users\DUCKLO~1\AppData\Local\Temp\t-tgKfxN\0-messages.nsh"
-    !include "C:\Users\DUCKLO~1\AppData\Local\Temp\t-tgKfxN\1-messages.nsh"
+    !include "C:\Users\DUCKLO~1\AppData\Local\Temp\t-7V38AL\0-messages.nsh"
+    !include "C:\Users\DUCKLO~1\AppData\Local\Temp\t-7V38AL\1-messages.nsh"
     !addplugindir /x86-unicode "C:\Users\ducklorl815\AppData\Local\electron-builder\Cache\nsis\nsis-resources-3.4.1\plugins\x86-unicode"
 
     Var newStartMenuLink
