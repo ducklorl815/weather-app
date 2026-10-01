@@ -46,7 +46,7 @@
         let sessionOffline = false;
         let sessionNeedsReconnect = false;
         // [Important] 重新連結／首次登入共用的完整功能授權清單
-        const ALL_GOOGLE_FEATURE_TYPES = ['calendar', 'tasks', 'gmail', 'gchat', 'sheets', 'sitesVisits', 'chat'];
+        const ALL_GOOGLE_FEATURE_TYPES = ['calendar', 'gmail', 'gchat', 'sheets', 'notes', 'sitesVisits', 'chat', 'reportExport'];
 
         function paintCredentialProbe(probe, loginRes = {}) {
             const summaryEl = document.getElementById('auth-probe-summary');
@@ -807,6 +807,17 @@
             return [...new Set(mosaicItems.map(i => i.type).filter(t => WIDGET_CATALOG[t]))];
         }
 
+        /** [Important] ADR 0006：把 mosaic Active Feature List 推給 Main，背景閘門以此為準 */
+        async function syncActiveFeaturesToMain() {
+            const types = mosaicFeatureTypes();
+            try {
+                await window.api.setActiveFeatures?.(types);
+            } catch (err) {
+                console.warn('[ActiveFeatures] sync failed:', err?.message || err);
+            }
+            return types;
+        }
+
         function paintFeatureAuthGate(el, type, label) {
             if (!el) return;
             const name = label || type;
@@ -830,8 +841,9 @@
 
         async function authorizeFeature(type) {
             const labelMap = {
-                calendar: '預定行程', tasks: '待辦事項', gmail: '未讀郵件',
-                gchat: 'Little Reply', sheets: '9527', sitesVisits: '網站瀏覽紀錄', chat: '詢問機器人'
+                calendar: '預定行程', notes: '記事', gmail: '未讀郵件',
+                gchat: 'Little Reply', sheets: '9527', sitesVisits: '網站瀏覽紀錄', chat: '詢問機器人',
+                reportExport: 'SQL 清單列表'
             };
             const label = labelMap[type] || type;
             try {
@@ -856,8 +868,8 @@
         }
 
         function refreshAll() {
-            if (document.getElementById('task-list')) loadTasks();
             if (document.getElementById('cal-list')) loadCalendar();
+            if (document.getElementById('notes-root')) loadNotes();
             if (document.getElementById('gmail-list')) loadGmail();
             if (document.getElementById('gchat-list')) loadGchat();
             if (document.getElementById('sheets-list')) loadSheets();
@@ -870,8 +882,12 @@
             await initDistFeatures();
             applySettingsMode();
             restoreMosaic();
+            // [Important] ADR 0006：先推 Active Feature List，再允許背景／Toast watch
+            const activeTypes = await syncActiveFeaturesToMain();
             refreshAll();
-            syncGchatAlertPrefAndPoll();
+            if (activeTypes.includes('gchat')) {
+                syncGchatAlertPrefAndPoll();
+            }
             refreshBugReportBadge();
             try {
                 const sess = await window.api.ensureSession();
@@ -902,10 +918,11 @@
             });
             window.api.onFeatureSyncTick?.((type) => {
                 if (type === 'calendar' && document.getElementById('cal-list')) loadCalendar();
-                if (type === 'tasks' && document.getElementById('task-list')) loadTasks();
+                if (type === 'notes' && document.getElementById('notes-root')) loadNotes();
                 if (type === 'sheets' && document.getElementById('sheets-list')) loadSheets();
                 if (type === 'sitesVisits' && document.getElementById('sites-visits-list')) loadSitesVisits();
                 if (type === 'chat' && document.getElementById('chat-log')) mountChat();
+                if (type === 'reportExport' && document.getElementById('re-root')) mountReportExport();
             });
             window.api.onFeaturesSynced?.(({ types } = {}) => {
                 for (const t of types || []) refreshWidget(t).catch?.(() => {});
@@ -931,12 +948,13 @@
                 extra: '<button class="add-btn" onclick="event.stopPropagation(); showCreateEventModal()">+</button>',
                 mount: () => loadCalendar()
             },
-            tasks: {
-                title: '☑️ 待辦事項',
-                minW: 3, minH: 4, w: 4, h: 7,
+            notes: {
+                title: '📝 記事',
+                addLabel: '加入記事',
+                minW: 3, minH: 4, w: 4, h: 8,
                 partial: true,
                 extra: '',
-                mount: () => loadTasks()
+                mount: () => loadNotes()
             },
             gmail: {
                 title: '📧 未讀郵件',
@@ -976,6 +994,14 @@
                 extra: `<button class="link-btn" onclick="event.stopPropagation(); showChatView('kb')">資料庫</button>
                     <button class="link-btn" onclick="event.stopPropagation(); showChatView('settings')">設定</button>`,
                 mount: () => mountChat()
+            },
+            reportExport: {
+                title: '📤 SQL 清單列表',
+                addLabel: '加入 SQL 清單列表',
+                minW: 5, minH: 5, w: 6, h: 9,
+                partial: true,
+                extra: '',
+                mount: () => mountReportExport()
             }
         };
 
@@ -1021,7 +1047,10 @@
         function pruneUnavailableMosaicItems() {
             const before = mosaicItems.length;
             mosaicItems = mosaicItems.filter(i => isWidgetAvailable(i.type));
-            if (mosaicItems.length !== before) saveMosaic();
+            if (mosaicItems.length !== before) {
+                saveMosaic();
+                syncActiveFeaturesToMain();
+            }
         }
 
         function catalogEntriesForMenu() {
@@ -1095,17 +1124,28 @@
             document.getElementById('add-menu').classList.remove('open');
             renderMosaic({ mountType: type });
             saveMosaic();
-            ensureSessionForWidget().then(() => refreshWidget(type));
+            // [Important] ADR 0006：Feature On → 先推清單喚醒背景，再授權／刷新
+            syncActiveFeaturesToMain().then(async () => {
+                await ensureSessionForWidget();
+                await refreshWidget(type);
+                if (type === 'gchat') await syncGchatAlertPrefAndPoll();
+            });
         }
 
         function removeWidget(type) {
             mosaicItems = mosaicItems.filter(i => i.type !== type);
             if (type === 'sheets') stopSheetsPoll();
             if (type === 'sitesVisits') stopSitesVisitsPoll();
-            if (type === 'gchat') stopGchatPoll();
+            if (type === 'gchat') {
+                stopGchatPoll();
+                stopGchatAlertPoll();
+                try { window.api.gchatToastHide?.(); } catch (_) {}
+            }
             compactMosaic();
             renderMosaic();
             saveMosaic();
+            // [Important] ADR 0006：Feature Off → Main 停該功能背景
+            syncActiveFeaturesToMain();
         }
 
         function findMosaicPlace(w, h) {
@@ -1180,7 +1220,7 @@
         async function renderMosaic({ mountType } = {}) {
             const board = document.getElementById('mosaic');
             if (!mosaicItems.length) {
-                board.innerHTML = `<div class="mosaic-empty"><div>工作台還是空的</div><div>用左上角「加入功能」把日曆、待辦、郵件拼進來</div></div>`;
+                board.innerHTML = `<div class="mosaic-empty"><div>工作台還是空的</div><div>用左上角「加入功能」把日曆、記事、郵件拼進來</div></div>`;
                 return;
             }
             const existing = new Set([...board.querySelectorAll('.tile')].map(el => el.dataset.type));
@@ -1209,9 +1249,12 @@
                 tile.id = 'tile-' + item.type;
                 tile.dataset.type = item.type;
                 const bodyHtml = bodies[item.type] || '';
+                const titleRefreshAttr = item.type === 'reportExport'
+                    ? `onclick="event.stopPropagation(); refreshWidget('${item.type}')" title="點一下重新整理列表"`
+                    : `ondblclick="event.stopPropagation(); refreshWidget('${item.type}')" title="雙擊重新連線"`;
                 tile.innerHTML = `
                     <div class="tile-header" onpointerdown="startMosaicDrag(event, '${item.type}', 'move')">
-                        <span class="tile-title" ondblclick="event.stopPropagation(); refreshWidget('${item.type}')" title="雙擊重新連線">${def.title}</span>
+                        <span class="tile-title" ${titleRefreshAttr}>${def.title}</span>
                         ${def.extra || ''}
                         <button class="tile-remove" title="移除此功能" onclick="event.stopPropagation(); removeWidget('${item.type}')">✕</button>
                     </div>
@@ -1305,6 +1348,13 @@
             if (!e.target.closest('.app-settings')) {
                 document.getElementById('app-settings-menu')?.classList.remove('open');
             }
+            // 記事上方 ⋯（垃圾桶／加入共享）點外面關閉
+            if (!e.target.closest('.notes-menu-btn') && !e.target.closest('.notes-menu-pop')) {
+                notesCloseMenu();
+            }
+            if (notesItemMenuId && !e.target.closest('.notes-item-more')) {
+                notesCloseItemMenu();
+            }
         });
 
         function escapeHtml(str) {
@@ -1316,209 +1366,747 @@
         }
 
 
-        // ========== 【FEATURE: tasks】待辦（邏輯待下沉 features/tasks/logic.js） ==========
-        let currentTasks = {};
+        // ========== 【FEATURE: notes】記事（分頁主題＋精簡編輯） ==========
+        let notesView = 'active';
+        let notesOpenId = null;
+        let notesCurrent = null;
+        let notesColors = [];
+        let notesTabList = [];
+        let notesCollapsed = {}; // itemId -> true when children hidden
+        let notesDetailOpen = {}; // itemId -> detail panel open (edit mode)
+        let notesMoreOpen = false;
+        let notesItemMenuId = null; // itemId whose ⋯ menu is open
+        let notesDrafts = {}; // itemId -> { text?, detail? } local drafts before Sheet write
+        let notesSaveTimer = null;
 
-        function indexTasksFromTree(list) {
-            for (const t of list || []) {
-                currentTasks[t.id] = t;
-                indexTasksFromTree(t.children);
+        function notesAccent() {
+            return (notesCurrent && notesCurrent.color) || 'var(--accent-color)';
+        }
+
+        function notesApplyAccent(el) {
+            const host = el || document.getElementById('notes-shell') || document.getElementById('notes-root');
+            if (host) host.style.setProperty('--notes-accent', notesAccent());
+        }
+
+        function notesSetHint(text) {
+            // kept for compatibility; hint shown inline when needed
+            const el = document.getElementById('notes-sync-hint');
+            if (el) el.textContent = text || '';
+        }
+
+        function notesAskText({ title, label, defaultValue, placeholder, onOk }) {
+            setModalKind?.('');
+            document.getElementById('modal-body').innerHTML = `
+                <div class="modal-title">${escapeHtml(title || '輸入')}</div>
+                <form id="notes-ask-form" style="display:flex;flex-direction:column;gap:12px;padding-top:12px;">
+                    <label for="notes-ask-input" style="font-weight:600;font-size:0.9em;color:var(--text-sub);">${escapeHtml(label || '')}</label>
+                    <input type="text" id="notes-ask-input" value="${escapeHtml(String(defaultValue || '')).replace(/"/g, '&quot;')}"
+                        placeholder="${escapeHtml(placeholder || '')}"
+                        style="width:100%;padding:12px;border:1px solid var(--item-border);box-sizing:border-box;border-radius:8px;background:var(--bg-color);color:var(--text-main);font-size:1em;">
+                    <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn-ghost" id="notes-ask-cancel">取消</button>
+                        <button type="submit" class="btn-primary">確定</button>
+                    </div>
+                </form>`;
+            document.getElementById('detail-modal').style.display = 'flex';
+            const input = document.getElementById('notes-ask-input');
+            const form = document.getElementById('notes-ask-form');
+            const finish = (val) => { closeModal(); if (val != null) onOk?.(val); };
+            document.getElementById('notes-ask-cancel')?.addEventListener('click', () => finish(null));
+            form?.addEventListener('submit', (e) => { e.preventDefault(); finish(String(input?.value || '').trim()); });
+            setTimeout(() => { input?.focus(); input?.select(); }, 0);
+        }
+
+        function notesToggleMenu(ev) {
+            ev?.stopPropagation?.();
+            const pop = document.getElementById('notes-menu-pop');
+            if (!pop) return;
+            const show = pop.hasAttribute('hidden');
+            if (show) pop.removeAttribute('hidden');
+            else pop.setAttribute('hidden', '');
+        }
+
+        function notesCloseMenu() {
+            document.getElementById('notes-menu-pop')?.setAttribute('hidden', '');
+        }
+
+        function notesMenuAction(act) {
+            notesCloseMenu();
+            if (act === 'trash') {
+                notesView = 'trash';
+                notesOpenId = null;
+                loadNotes();
+            } else if (act === 'join') {
+                notesJoinSheet();
             }
         }
 
-        function renderTaskChildren(children) {
-            if (!children?.length) return '';
-            return `<div class="task-sub-list">${children.map(c => `
-                <div class="task-sub-item ${c.status === 'completed' ? 'task-completed' : ''}" id="task-item-${escapeHtml(c.id)}">
-                    <input type="checkbox" class="task-checkbox" ${c.status === 'completed' ? 'checked' : ''}
-                        onchange="toggleTask('${escapeHtml(c.id)}')">
-                    <div class="task-main">
-                        <span class="task-title" title="點擊編輯子工作" onclick="startEditTask('${escapeHtml(c.id)}')">${escapeHtml(c.title || '（無標題）')}</span>
-                        ${c.notes ? `<div class="task-notes-preview">${escapeHtml(c.notes)}</div>` : ''}
-                    </div>
-                    <button type="button" class="task-edit-btn" title="編輯子工作" onclick="startEditTask('${escapeHtml(c.id)}')">✎</button>
-                </div>`).join('')}</div>`;
-        }
+        let notesDraggingTabId = null;
 
-        function renderTaskItem(t) {
-            const kids = t.children || [];
-            const doneKids = kids.filter(c => c.status === 'completed').length;
-            return `
-                <div class="list-item ${t.status === 'completed' ? 'task-completed' : ''}" id="task-item-${escapeHtml(t.id)}">
-                    <div class="task-row">
-                        <input type="checkbox" class="task-checkbox" ${t.status === 'completed' ? 'checked' : ''}
-                            onchange="toggleTask('${escapeHtml(t.id)}')">
-                        <div class="task-main">
-                            <span class="task-title" title="點擊編輯" onclick="startEditTask('${escapeHtml(t.id)}')">${escapeHtml(t.title || '（無標題）')}</span>
-                            ${t.notes ? `<div class="task-notes-preview">${escapeHtml(t.notes)}</div>` : ''}
-                            ${kids.length ? `<div class="task-sub-count">子工作 ${doneKids}/${kids.length}</div>` : ''}
-                            ${renderTaskChildren(kids)}
-                        </div>
-                        <button type="button" class="task-edit-btn" title="編輯" onclick="startEditTask('${escapeHtml(t.id)}')">✎</button>
-                    </div>
-                </div>`;
-        }
-
-        async function loadTasks() {
-            const list = document.getElementById('task-list');
-            if (!list) return;
-            if (!(await ensureFeatureAuthorized('tasks'))) {
-                paintFeatureAuthGate(list, 'tasks', '待辦事項');
+        function renderNotesTabs() {
+            const tabs = document.getElementById('notes-tabs');
+            if (!tabs) return;
+            if (notesView === 'trash') {
+                tabs.innerHTML = `<button type="button" class="notes-tab is-active" disabled>垃圾桶</button>
+                    <button type="button" class="notes-tab" onclick="notesExitTrash()">← 返回</button>`;
                 return;
             }
-            const res = await window.api.getTasks();
-            if (!res.success) {
-                list.innerHTML = `<div class="loading">${escapeHtml(res.error || '讀取失敗')}</div>`;
+            if (!notesTabList.length) {
+                tabs.innerHTML = `<span class="notes-tabs-empty">尚無主題</span>`;
                 return;
             }
-            currentTasks = {};
-            if (res.byId && typeof res.byId === 'object') {
-                currentTasks = { ...res.byId };
-            } else {
-                indexTasksFromTree(res.tasks || []);
-            }
-            list.innerHTML = (res.tasks || []).map(renderTaskItem).join('')
-                || `<div class="loading">尚無待辦</div>`;
+            tabs.innerHTML = notesTabList.map((n) => {
+                const active = n.noteId === notesOpenId ? 'is-active' : '';
+                const pin = n.pinned ? '·' : '';
+                const shared = (n.role === 'collaborator' || n.hasCollaborators)
+                    ? `<span class="notes-tab-shared" title="${n.role === 'collaborator' ? '與我共享' : '已分享給他人'}">⎘</span>`
+                    : '';
+                const sharedCls = (n.role === 'collaborator' || n.hasCollaborators) ? 'is-shared' : '';
+                const colorDot = n.color
+                    ? `<span class="notes-tab-dot" style="background:${escapeHtml(n.color)}"></span>`
+                    : '';
+                const idJs = JSON.stringify(n.noteId);
+                return `<button type="button" class="notes-tab ${active} ${sharedCls}" role="tab" draggable="true"
+                    data-note-id="${escapeHtml(n.noteId)}"
+                    onclick='notesOpen(${idJs})'
+                    ondragstart='notesTabDragStart(event, ${idJs})'
+                    ondragend="notesTabDragEnd(event)"
+                    ondragover="notesTabDragOver(event)"
+                    ondragleave="notesTabDragLeave(event)"
+                    ondrop='notesTabDrop(event, ${idJs})'
+                    title="${escapeHtml(n.title || '未命名')}">
+                    ${shared}${colorDot}<span class="notes-tab-label">${pin}${escapeHtml(n.title || '未命名')}</span>
+                </button>`;
+            }).join('');
         }
 
-        async function addTask() {
-            const input = document.getElementById('new-task');
-            if (!input || !input.value.trim()) return;
-            const res = await window.api.addTask({ title: input.value.trim() });
-            if (!res?.success) return alert(res?.error || '新增失敗');
-            input.value = '';
-            loadTasks();
+        function notesTabDragStart(ev, noteId) {
+            notesDraggingTabId = noteId;
+            ev.dataTransfer.effectAllowed = 'move';
+            ev.currentTarget.classList.add('is-dragging');
+            document.getElementById('notes-tabs')?.classList.add('is-reordering');
         }
 
-        async function toggleTask(id) {
-            const t = currentTasks[id];
-            if (!t) return;
-            const next = t.status === 'completed' ? 'needsAction' : 'completed';
-            // 只 patch 狀態，不碰 title／notes
-            const res = await window.api.updateTask(id, { status: next });
-            if (!res?.success) return alert(res?.error || '更新失敗');
-            loadTasks();
+        function notesTabDragEnd(ev) {
+            notesDraggingTabId = null;
+            ev.currentTarget.classList.remove('is-dragging');
+            document.querySelectorAll('.notes-tab.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+            document.getElementById('notes-tabs')?.classList.remove('is-reordering');
         }
 
-        function startEditTask(id) {
-            const t = currentTasks[id];
-            const item = document.getElementById(`task-item-${id}`);
-            if (!t || !item || item.querySelector('.task-edit-panel')) return;
-            const isSub = !!t.parent;
-            const kids = t.children || [];
-            const notesVal = escapeHtml(t.notes || '');
-            const titleVal = escapeHtml(t.title || '').replace(/"/g, '&quot;');
-            const subRows = isSub ? '' : `
-                <div class="task-sub-edit-block">
-                    <div class="task-sub-edit-label">子工作</div>
-                    <div id="task-sub-edit-list-${escapeHtml(id)}">
-                        ${kids.map(c => `
-                            <div class="task-sub-edit-row" data-sub-id="${escapeHtml(c.id)}">
-                                <input type="checkbox" class="task-checkbox" ${c.status === 'completed' ? 'checked' : ''}
-                                    onchange="toggleTask('${escapeHtml(c.id)}')">
-                                <input type="text" class="task-title-input task-sub-title-input" value="${escapeHtml(c.title || '').replace(/"/g, '&quot;')}" placeholder="子工作標題">
-                            </div>`).join('')}
-                    </div>
-                    <div class="task-sub-add-row">
-                        <input type="text" class="task-title-input" id="task-new-sub-${escapeHtml(id)}" placeholder="新增子工作…">
-                        <button type="button" class="add-btn" title="新增子工作" onclick="addSubTask('${escapeHtml(id)}')">+</button>
-                    </div>
-                </div>`;
-            item.innerHTML = `
-                <div class="task-edit-panel">
-                    <input type="text" class="task-title-input" id="task-edit-title-${escapeHtml(id)}" value="${titleVal}" placeholder="標題">
-                    <textarea class="task-notes-input" id="task-edit-notes-${escapeHtml(id)}" placeholder="詳細資料（選填）">${notesVal}</textarea>
-                    ${subRows}
-                    <div class="task-edit-actions">
-                        <button type="button" class="add-btn" title="儲存" onclick="saveEditTask('${escapeHtml(id)}')">儲存</button>
-                        <button type="button" class="add-btn" title="取消" onclick="loadTasks()">取消</button>
-                    </div>
-                </div>`;
-            const titleInput = document.getElementById(`task-edit-title-${id}`);
-            titleInput?.focus();
-            titleInput?.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    loadTasks();
-                }
-            });
-            document.getElementById(`task-edit-notes-${id}`)?.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    loadTasks();
-                }
-            });
-            document.getElementById(`task-new-sub-${id}`)?.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    addSubTask(id);
-                }
-            });
+        function notesTabDragOver(ev) {
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+            ev.currentTarget.classList.add('is-drop-target');
         }
 
-        async function addSubTask(parentId) {
-            const input = document.getElementById(`task-new-sub-${parentId}`);
-            const title = input?.value?.trim();
-            if (!title) return;
-            input.disabled = true;
-            const res = await window.api.addTask({ title, parent: parentId });
+        function notesTabDragLeave(ev) {
+            ev.currentTarget.classList.remove('is-drop-target');
+        }
+
+        async function notesTabDrop(ev, targetId) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            ev.currentTarget.classList.remove('is-drop-target');
+            const fromId = notesDraggingTabId;
+            notesDraggingTabId = null;
+            if (!fromId || fromId === targetId) return;
+            const ids = notesTabList.map((n) => n.noteId);
+            const from = ids.indexOf(fromId);
+            const to = ids.indexOf(targetId);
+            if (from < 0 || to < 0) return;
+            ids.splice(from, 1);
+            ids.splice(to, 0, fromId);
+            const res = await window.api.notesReorderTabs?.({ noteIds: ids });
             if (!res?.success) {
-                input.disabled = false;
-                return alert(res?.error || '新增子工作失敗');
+                alert(res?.error || '無法調整分頁順序');
+                return;
             }
-            // 重新載入後維持編輯父任務
-            await loadTasks();
-            startEditTask(parentId);
+            notesOpenId = fromId;
+            loadNotes();
         }
 
-        async function saveEditTask(id) {
-            const t = currentTasks[id];
-            const titleEl = document.getElementById(`task-edit-title-${id}`);
-            const notesEl = document.getElementById(`task-edit-notes-${id}`);
-            if (!t || !titleEl || !notesEl) return;
-            const title = titleEl.value.trim();
-            const notes = notesEl.value;
-            if (!title) return alert('標題不能空白');
+        function notesExitTrash() {
+            notesView = 'active';
+            notesOpenId = notesTabList[0]?.noteId || null;
+            loadNotes();
+        }
 
-            titleEl.disabled = true;
-            notesEl.disabled = true;
+        function renderTrashList(notes) {
+            if (!notes?.length) return `<div class="loading">垃圾桶是空的</div>`;
+            return notes.map((n) => `
+                <div class="notes-list-item">
+                    <div class="notes-list-main">
+                        <div class="notes-list-title">${escapeHtml(n.title || '未命名')}</div>
+                    </div>
+                    <div class="notes-list-actions">
+                        <button type="button" class="link-btn" onclick="notesRestore('${escapeHtml(n.noteId)}')">還原</button>
+                        <button type="button" class="link-btn" onclick="notesPurge('${escapeHtml(n.noteId)}')">刪除</button>
+                    </div>
+                </div>`).join('');
+        }
 
-            // 父／子任務：只送有變更的欄位；細項與標題可分開更新
-            const fields = {};
-            if (title !== (t.title || '')) fields.title = title;
-            if (notes !== (t.notes || '')) fields.notes = notes;
+        function notesBuildTreeLocal(items) {
+            const map = {};
+            for (const it of items || []) map[it.id] = { ...it, children: [] };
+            const roots = [];
+            for (const it of Object.values(map)) {
+                if (it.parentId && map[it.parentId]) map[it.parentId].children.push(it);
+                else roots.push(it);
+            }
+            const byPos = (a, b) => (a.position || 0) - (b.position || 0);
+            for (const it of Object.values(map)) it.children.sort(byPos);
+            roots.sort(byPos);
+            return roots;
+        }
 
-            if (Object.keys(fields).length) {
-                const res = await window.api.updateTask(id, fields);
-                if (!res?.success) {
-                    titleEl.disabled = false;
-                    notesEl.disabled = false;
-                    return alert(res?.error || '儲存失敗');
+        function notesSyncLocalTree(flat) {
+            if (!notesCurrent) return;
+            notesCurrent.flatItems = flat;
+            notesCurrent.items = notesBuildTreeLocal(flat);
+        }
+
+        function renderNoteItemRow(it, depth) {
+            const id = escapeHtml(it.id);
+            const kids = it.children || [];
+            const collapsed = !!notesCollapsed[it.id];
+            const editing = !!notesDetailOpen[it.id];
+            const draft = notesDrafts[it.id] || {};
+            const titleText = draft.text != null ? draft.text : (it.text || '');
+            const detailText = draft.detail != null ? draft.detail : (it.detail || '');
+            const done = it.checked ? 'is-done' : '';
+            const hasKids = !depth && kids.length > 0;
+            const chevron = hasKids
+                ? `<button type="button" class="notes-collapse-btn ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? '展開子任務' : '收合子任務'}"
+                    onclick="event.stopPropagation(); notesToggleCollapse('${id}')" aria-label="收合">
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6 3l6 5-6 5V3z"/></svg>
+                   </button>`
+                : (depth ? '' : `<span class="notes-collapse-spacer" aria-hidden="true"></span>`);
+            const kidsHtml = (!depth && !collapsed)
+                ? kids.map((c) => renderNoteItemRow(c, 1)).join('')
+                : '';
+            let detailHtml = '';
+            if (editing) {
+                detailHtml = `<div class="notes-item-detail is-editing">
+                    <textarea class="notes-detail-input" placeholder="詳情（選填）…"
+                        oninput="notesDraftDetail('${id}', this.value)"
+                        onblur="notesCommitDetail('${id}', this.value, event)">${escapeHtml(detailText)}</textarea>
+                </div>`;
+            } else if (String(detailText).trim()) {
+                detailHtml = `<div class="notes-item-detail">
+                    <span class="notes-detail-text" title="點擊編輯詳情" onclick="notesToggleItemDetail('${id}')">${escapeHtml(detailText)}</span>
+                </div>`;
+            }
+            // [Important] 子任務入口固定在父項下方；無子項時不畫樹線，有子項且展開才畫線
+            const addSubHtml = !depth
+                ? `<button type="button" class="link-btn notes-add-sub"
+                    onmousedown="event.preventDefault()"
+                    onclick="event.stopPropagation(); notesAddItem('${id}')">＋ 子任務</button>`
+                : '';
+            let branchHtml = '';
+            if (!depth && !collapsed) {
+                if (hasKids) {
+                    branchHtml = `<div class="notes-branch">${addSubHtml}${kidsHtml ? `<div class="notes-children">${kidsHtml}</div>` : ''}</div>`;
+                } else if (addSubHtml) {
+                    branchHtml = `<div class="notes-add-sub-wrap">${addSubHtml}</div>`;
                 }
             }
+            return `<div class="notes-item-block ${depth ? 'is-nested' : 'is-root'}" data-item-id="${id}" data-depth="${depth}">
+                <div class="notes-item ${done}">
+                    ${chevron}
+                    <label class="notes-check">
+                        <input type="checkbox" ${it.checked ? 'checked' : ''}
+                            onchange="notesToggleItem('${id}', this.checked)">
+                        <span class="notes-check-ui"></span>
+                    </label>
+                    <input type="text" class="notes-item-input" value="${escapeHtml(titleText).replace(/"/g, '&quot;')}"
+                        oninput="notesDraftTitle('${id}', this.value)"
+                        onblur="notesCommitTitle('${id}', this.value)"
+                        onkeydown="if(event.key==='Enter'){this.blur();}">
+                    <button type="button" class="notes-icon-btn ${editing ? 'is-on' : ''}" title="詳情"
+                        onclick="notesToggleItemDetail('${id}')">詳</button>
+                    <div class="notes-item-more">
+                        <button type="button" class="notes-icon-btn ${notesItemMenuId === it.id ? 'is-on' : ''}" title="更多"
+                            onclick="event.stopPropagation(); notesToggleItemMenu('${id}')">⋯</button>
+                        ${notesItemMenuId === it.id ? `<div class="notes-item-menu" role="menu">
+                            <button type="button" class="notes-item-menu-danger" role="menuitem"
+                                onclick="event.stopPropagation(); notesConfirmRemoveItem('${id}')">刪除項目</button>
+                        </div>` : ''}
+                    </div>
+                </div>
+                ${detailHtml}
+                ${branchHtml}
+            </div>`;
+        }
 
-            // 父任務編輯面板內的子工作標題
-            if (!t.parent) {
-                const listEl = document.getElementById(`task-sub-edit-list-${id}`);
-                const rows = [...(listEl?.querySelectorAll('.task-sub-edit-row') || [])];
-                for (const row of rows) {
-                    const subId = row.getAttribute('data-sub-id');
-                    const sub = currentTasks[subId];
-                    const subInput = row.querySelector('.task-sub-title-input');
-                    if (!sub || !subInput) continue;
-                    const subTitle = subInput.value.trim();
-                    if (!subTitle) continue;
-                    if (subTitle === (sub.title || '')) continue;
-                    const subRes = await window.api.updateTask(subId, { title: subTitle });
-                    if (!subRes?.success) {
-                        titleEl.disabled = false;
-                        notesEl.disabled = false;
-                        return alert(subRes?.error || '子工作儲存失敗');
+        function renderNoteDetail(note) {
+            const accent = note.color || '';
+            const colors = (notesColors || []).map((c) => {
+                const active = (note.color || '') === c ? 'is-active' : '';
+                const bg = c || 'transparent';
+                return `<button type="button" class="notes-swatch ${active}" style="background:${bg}"
+                    onclick="notesSetColor('${escapeHtml(note.noteId)}','${escapeHtml(c)}')"></button>`;
+            }).join('');
+            const collab = (note.collaborators || []).map((em) =>
+                `<span class="notes-collab">${escapeHtml(em)}
+                    ${note.role === 'owner' ? `<button type="button" class="link-btn" onclick="notesRevoke('${escapeHtml(em)}')">撤銷</button>` : ''}
+                </span>`
+            ).join('') || '<span class="notes-muted">尚無協作者</span>';
+            const items = (note.items || []).map((it) => renderNoteItemRow(it, 0)).join('')
+                || `<div class="notes-empty-items">尚無項目，在下方新增</div>`;
+            const moreOpen = notesMoreOpen ? '' : 'hidden';
+            return `<div class="notes-detail" style="--notes-accent:${accent || 'var(--accent-color)'}">
+                <div class="notes-title-row">
+                    <input type="text" class="notes-title-input" value="${escapeHtml(note.title || '').replace(/"/g, '&quot;')}"
+                        onblur="notesSaveTitle(this.value)" onkeydown="if(event.key==='Enter'){this.blur();}" placeholder="主題名稱">
+                    <button type="button" class="notes-icon-btn" title="主題設定" onclick="notesToggleMore()">⚙</button>
+                </div>
+                <div class="notes-more" ${moreOpen}>
+                    <div class="notes-more-section">
+                        <div class="notes-more-label">顏色</div>
+                        <div class="notes-swatches">${colors}</div>
+                    </div>
+                    <div class="notes-more-section">
+                        <div class="notes-more-label">協作</div>
+                        <div class="notes-collab-list">${collab}</div>
+                        ${note.role === 'owner' ? `<div class="notes-invite-row">
+                            <input type="email" class="task-input" id="notes-share-email" placeholder="邀請 Google email…">
+                            <button type="button" class="notes-add-topic" onclick="notesShareOpen()" title="邀請">↗</button>
+                        </div>` : ''}
+                        <div class="notes-muted">Sheet ID（對方「加入共享」用）<br><code class="notes-sheet-id">${escapeHtml(note.spreadsheetId || '—')}</code>
+                            <button type="button" class="link-btn" onclick="notesCopySheetId()">複製</button>
+                        </div>
+                    </div>
+                    <div class="notes-more-actions">
+                        ${note.role === 'collaborator'
+                            ? `<button type="button" class="link-btn" onclick="notesLeaveOpen()">離開共享</button>`
+                            : `<button type="button" class="link-btn" onclick="notesTrashOpen()">移到垃圾桶</button>`}
+                        <button type="button" class="link-btn" onclick="notesTogglePin('${escapeHtml(note.noteId)}', ${note.pinned ? 'false' : 'true'})">${note.pinned ? '取消釘選' : '釘選'}</button>
+                    </div>
+                </div>
+                <div class="notes-items" id="notes-items">${items}</div>
+                <div class="notes-add-row">
+                    <input type="text" class="task-input" id="notes-new-item" placeholder="新增項目…"
+                        onkeypress="if(event.key==='Enter') notesAddItem()">
+                    <button type="button" class="notes-add-topic" onclick="notesAddItem()" title="新增項目">+</button>
+                </div>
+                <div class="notes-shared-footer">${notesSharedFooterText(note)}</div>
+            </div>`;
+        }
+
+        function notesSharedFooterText(note) {
+            const collabs = note.collaborators || [];
+            if (note.role === 'collaborator') {
+                return `與誰共用：Owner ${escapeHtml(note.ownerEmail || '—')}${collabs.length ? `、${escapeHtml(collabs.join('、'))}` : ''}`;
+            }
+            if (collabs.length) return `與誰共用：${escapeHtml(collabs.join('、'))}`;
+            return '與誰共用：僅自己（私人）';
+        }
+
+        function notesToggleMore() {
+            notesMoreOpen = !notesMoreOpen;
+            if (notesCurrent) {
+                document.getElementById('notes-root').innerHTML = renderNoteDetail(notesCurrent);
+                notesApplyAccent();
+            }
+        }
+
+        function notesCopySheetId() {
+            const id = notesCurrent?.spreadsheetId || '';
+            if (!id) return;
+            navigator.clipboard?.writeText(id).then(() => alert('已複製 Sheet ID')).catch(() => alert(id));
+        }
+
+        function notesToggleCollapse(itemId) {
+            notesCollapsed[itemId] = !notesCollapsed[itemId];
+            if (notesCurrent) {
+                document.getElementById('notes-root').innerHTML = renderNoteDetail(notesCurrent);
+                notesApplyAccent();
+            }
+        }
+
+        function notesToggleItemDetail(itemId) {
+            notesDetailOpen[itemId] = !notesDetailOpen[itemId];
+            notesRerenderDetail();
+            if (notesDetailOpen[itemId]) {
+                setTimeout(() => {
+                    document.querySelector(`[data-item-id="${CSS.escape(itemId)}"] .notes-detail-input`)?.focus();
+                }, 0);
+            }
+        }
+
+        function notesDraftTitle(itemId, text) {
+            if (!notesDrafts[itemId]) notesDrafts[itemId] = {};
+            notesDrafts[itemId].text = String(text || '');
+        }
+
+        function notesDraftDetail(itemId, detail) {
+            if (!notesDrafts[itemId]) notesDrafts[itemId] = {};
+            notesDrafts[itemId].detail = String(detail || '');
+        }
+
+        async function notesCommitTitle(itemId, text) {
+            const next = String(text || '');
+            const flat = notesFlatFromCurrent();
+            const it = flat.find((x) => x.id === itemId);
+            if (!it) return;
+            if (notesDrafts[itemId]) delete notesDrafts[itemId].text;
+            if (it.text === next) return;
+            it.text = next;
+            notesSyncLocalTree(flat);
+            await notesPersistFlat(flat); // 不重繪，避免輸入卡頓
+        }
+
+        async function notesCommitDetail(itemId, detail, ev) {
+            const related = ev?.relatedTarget;
+            // 點「＋ 子任務」或開輸入 modal 時勿關詳情面板（否則會吞掉後續點擊）
+            if (related?.closest?.('.notes-add-sub') || related?.closest?.('#detail-modal')) {
+                const next = String(detail || '');
+                const flat = notesFlatFromCurrent();
+                const it = flat.find((x) => x.id === itemId);
+                if (it && String(it.detail || '') !== next) {
+                    it.detail = next;
+                    if (notesDrafts[itemId]) delete notesDrafts[itemId].detail;
+                    notesSyncLocalTree(flat);
+                    await notesPersistFlat(flat);
+                }
+                return;
+            }
+            const next = String(detail || '');
+            const flat = notesFlatFromCurrent();
+            const it = flat.find((x) => x.id === itemId);
+            if (!it) return;
+            if (notesDrafts[itemId]) delete notesDrafts[itemId].detail;
+            if (String(it.detail || '') === next) {
+                notesDetailOpen[itemId] = false;
+                notesRerenderDetail();
+                return;
+            }
+            it.detail = next;
+            notesSyncLocalTree(flat);
+            await notesPersistFlat(flat);
+            notesDetailOpen[itemId] = false;
+            notesRerenderDetail();
+        }
+
+        async function notesSaveItemDetail(itemId, detail) {
+            await notesCommitDetail(itemId, detail);
+        }
+
+        async function loadNotes() {
+            const root = document.getElementById('notes-root');
+            if (!root) return;
+            if (!(await ensureFeatureAuthorized('notes'))) {
+                paintFeatureAuthGate(root, 'notes', '記事');
+                return;
+            }
+            notesCloseMenu();
+            if (notesView === 'trash') {
+                root.innerHTML = `<div class="loading">載入垃圾桶…</div>`;
+                const res = await window.api.notesList({ view: 'trash' });
+                renderNotesTabs();
+                if (!res?.success) {
+                    root.innerHTML = `<div class="loading">${escapeHtml(res?.error || '讀取失敗')}</div>`;
+                    return;
+                }
+                root.innerHTML = renderTrashList(res.notes || []);
+                return;
+            }
+
+            const res = await window.api.notesList({ view: 'active' });
+            if (!res?.success) {
+                if (res?.needsAuth || res?.featureScopeMissing) {
+                    paintFeatureAuthGate(root, 'notes', '記事');
+                    return;
+                }
+                root.innerHTML = `<div class="loading">${escapeHtml(res?.error || '讀取失敗')}</div>`;
+                return;
+            }
+            notesColors = res.colors || notesColors;
+            notesTabList = res.notes || [];
+            if (!notesOpenId && notesTabList.length) notesOpenId = notesTabList[0].noteId;
+            if (notesOpenId && !notesTabList.some((n) => n.noteId === notesOpenId)) {
+                notesOpenId = notesTabList[0]?.noteId || null;
+            }
+            renderNotesTabs();
+            if (!notesOpenId) {
+                root.innerHTML = `<div class="notes-empty">按右側 <b>+</b> 新增主題</div>`;
+                return;
+            }
+            await notesOpen(notesOpenId, { skipTabs: true });
+        }
+
+        async function notesOpen(noteId, opts = {}) {
+            const root = document.getElementById('notes-root');
+            if (!root || !noteId) return;
+            notesView = 'active';
+            notesOpenId = noteId;
+            notesMoreOpen = false;
+            if (!opts.skipTabs) renderNotesTabs();
+            const res = await window.api.notesGet(noteId);
+            if (!res?.success) {
+                if (res?.needsAuth || res?.featureScopeMissing) {
+                    paintFeatureAuthGate(root, 'notes', '記事');
+                    return;
+                }
+                if (res?.removed) {
+                    alert(res.error || '此共享記事無效，已自動移除');
+                    notesOpenId = null;
+                    notesCurrent = null;
+                    return loadNotes();
+                }
+                alert(res?.error || '開啟失敗');
+                notesOpenId = null;
+                return loadNotes();
+            }
+            notesCurrent = res.note;
+            // refresh tab title/color from open note
+            const tab = notesTabList.find((n) => n.noteId === noteId);
+            if (tab) {
+                tab.title = res.note.title;
+                tab.color = res.note.color;
+                tab.pinned = res.note.pinned;
+                tab.hasCollaborators = (res.note.collaborators || []).length > 0;
+                renderNotesTabs();
+            }
+            root.innerHTML = renderNoteDetail(res.note);
+            notesApplyAccent();
+        }
+
+        function notesJoinSheet() {
+            notesAskText({
+                title: '加入共享筆記',
+                label: 'Google 試算表 ID 或網址（必須是記事分享的 Sheet）',
+                placeholder: '貼上 spreadsheetId 或試算表網址',
+                onOk: async (raw) => {
+                    if (!raw) return;
+                    try {
+                        const res = await window.api.notesJoinSheet({ spreadsheetId: raw });
+                        if (!res?.success) {
+                            if (res?.needsAuth || res?.featureScopeMissing) return authorizeFeature('notes');
+                            alert(res?.error || '加入失敗：格式不符或無權限，未寫入本機。');
+                            return;
+                        }
+                        notesOpenId = res.noteId;
+                        notesView = 'active';
+                        loadNotes();
+                    } catch (err) {
+                        alert('加入失敗：' + (err?.message || String(err)) + '\n未寫入本機。');
                     }
                 }
-            }
+            });
+        }
 
-            loadTasks();
+        function notesCreate() {
+            notesAskText({
+                title: '新增主題',
+                label: '主題名稱',
+                defaultValue: '新主題',
+                onOk: async (title) => {
+                    if (title == null) return;
+                    const res = await window.api.notesCreate({ title: title || '新主題' });
+                    if (!res?.success) {
+                        if (res?.needsAuth || res?.featureScopeMissing) return authorizeFeature('notes');
+                        return alert(res?.error || '建立失敗');
+                    }
+                    notesOpenId = res.noteId;
+                    notesView = 'active';
+                    loadNotes();
+                }
+            });
+        }
+
+        function notesFlatFromCurrent() {
+            return (notesCurrent?.flatItems || []).map((it) => ({ ...it }));
+        }
+
+        async function notesPersistFlat(flat) {
+            if (!notesOpenId) return null;
+            const res = await window.api.notesSaveItems({ noteId: notesOpenId, flatItems: flat });
+            if (!res?.success) {
+                alert(res?.error || '儲存失敗');
+                return null;
+            }
+            notesCurrent.flatItems = res.flatItems;
+            notesCurrent.items = res.items;
+            return res;
+        }
+
+        function notesRerenderDetail() {
+            const root = document.getElementById('notes-root');
+            if (root && notesCurrent) {
+                root.innerHTML = renderNoteDetail(notesCurrent);
+                notesApplyAccent();
+            }
+        }
+
+        async function notesSaveTitle(title) {
+            const t = String(title || '').trim();
+            if (!notesOpenId || !t) return;
+            const res = await window.api.notesUpdateTitle({ noteId: notesOpenId, title: t });
+            if (!res?.success) return alert(res?.error || '標題儲存失敗');
+            if (notesCurrent) notesCurrent.title = t;
+            const tab = notesTabList.find((n) => n.noteId === notesOpenId);
+            if (tab) { tab.title = t; renderNotesTabs(); }
+        }
+
+        async function notesToggleItem(itemId, checked) {
+            const flat = notesFlatFromCurrent();
+            const it = flat.find((x) => x.id === itemId);
+            if (!it) return;
+            it.checked = !!checked;
+            notesSyncLocalTree(flat);
+            const row = document.querySelector(`[data-item-id="${CSS.escape(itemId)}"] > .notes-item`);
+            row?.classList.toggle('is-done', !!checked);
+            await notesPersistFlat(flat);
+        }
+
+        async function notesRenameItem(itemId, text) {
+            await notesCommitTitle(itemId, text);
+        }
+
+        async function notesAddItem(parentId) {
+            if (parentId) {
+                notesAskText({
+                    title: '新增子任務',
+                    label: '文字',
+                    onOk: async (text) => {
+                        if (!text) return;
+                        await notesAppendItem(text, parentId);
+                    }
+                });
+                return;
+            }
+            const input = document.getElementById('notes-new-item');
+            const text = String(input?.value || '').trim();
+            if (!text) return;
+            if (input) input.value = '';
+            await notesAppendItem(text, '');
+        }
+
+        async function notesAppendItem(text, parentId) {
+            const flat = notesFlatFromCurrent();
+            const id = `item_${Date.now().toString(36)}`;
+            flat.push({
+                id,
+                text,
+                checked: false,
+                parentId: parentId || '',
+                position: flat.length + 1,
+                updatedAt: new Date().toISOString(),
+                detail: ''
+            });
+            if (parentId) notesCollapsed[parentId] = false;
+            const res = await notesPersistFlat(flat);
+            if (res) {
+                notesCurrent = { ...notesCurrent, items: res.items, flatItems: res.flatItems };
+                notesRerenderDetail();
+            }
+        }
+
+        async function notesRemoveItem(itemId) {
+            let flat = notesFlatFromCurrent().filter((x) => x.id !== itemId && x.parentId !== itemId);
+            flat.forEach((x, i) => { x.position = i + 1; });
+            notesItemMenuId = null;
+            const res = await notesPersistFlat(flat);
+            if (res) {
+                notesCurrent = { ...notesCurrent, items: res.items, flatItems: res.flatItems };
+                notesRerenderDetail();
+            }
+        }
+
+        function notesToggleItemMenu(itemId) {
+            notesItemMenuId = notesItemMenuId === itemId ? null : itemId;
+            notesRerenderDetail();
+        }
+
+        function notesCloseItemMenu() {
+            if (!notesItemMenuId) return;
+            notesItemMenuId = null;
+            notesRerenderDetail();
+        }
+
+        /** [Important] 刪除藏在 ⋯ 第二層，且必須確認，避免協作誤觸 */
+        function notesConfirmRemoveItem(itemId) {
+            notesItemMenuId = null;
+            const flat = notesFlatFromCurrent();
+            const it = flat.find((x) => x.id === itemId);
+            const label = String(it?.text || '此項目').trim() || '此項目';
+            const kids = flat.filter((x) => x.parentId === itemId).length;
+            const hint = kids
+                ? `確定刪除「${label}」？\n（會一併刪除 ${kids} 個子任務）`
+                : `確定刪除「${label}」？`;
+            if (!confirm(hint)) {
+                notesRerenderDetail();
+                return;
+            }
+            notesRemoveItem(itemId);
+        }
+
+        async function notesSetColor(noteId, color) {
+            const res = await window.api.notesSetPrefs({ noteId, color });
+            if (!res?.success) return alert(res?.error || '設定失敗');
+            if (notesCurrent?.noteId === noteId) {
+                notesCurrent.color = color;
+                const tab = notesTabList.find((n) => n.noteId === noteId);
+                if (tab) { tab.color = color; renderNotesTabs(); }
+                notesRerenderDetail();
+            }
+        }
+
+        async function notesTogglePin(noteId, pinned) {
+            const res = await window.api.notesSetPrefs({ noteId, pinned: !!pinned });
+            if (!res?.success) return alert(res?.error || '釘選失敗');
+            if (notesCurrent?.noteId === noteId) notesCurrent.pinned = !!pinned;
+            const tab = notesTabList.find((n) => n.noteId === noteId);
+            if (tab) tab.pinned = !!pinned;
+            renderNotesTabs();
+            notesRerenderDetail();
+        }
+
+        async function notesShareOpen() {
+            const email = document.getElementById('notes-share-email')?.value?.trim();
+            if (!email || !notesOpenId) return;
+            const res = await window.api.notesShare({ noteId: notesOpenId, email });
+            if (!res?.success) return alert(res?.error || '邀請失敗');
+            alert(res.message || '已分享試算表');
+            notesOpen(notesOpenId);
+        }
+
+        async function notesRevoke(email) {
+            if (!notesOpenId || !confirm(`撤銷 ${email}？`)) return;
+            const res = await window.api.notesRevoke({ noteId: notesOpenId, email });
+            if (!res?.success) return alert(res?.error || '撤銷失敗');
+            notesOpen(notesOpenId);
+        }
+
+        async function notesLeaveOpen() {
+            if (!notesOpenId || !confirm('離開此筆記？')) return;
+            const res = await window.api.notesLeave({ noteId: notesOpenId });
+            if (!res?.success) return alert(res?.error || '離開失敗');
+            notesOpenId = null;
+            loadNotes();
+        }
+
+        async function notesTrashOpen() {
+            if (!notesOpenId || !confirm('移到垃圾桶？')) return;
+            const res = await window.api.notesTrash({ noteId: notesOpenId });
+            if (!res?.success) return alert(res?.error || '失敗');
+            notesOpenId = null;
+            loadNotes();
+        }
+
+        async function notesRestore(noteId) {
+            const res = await window.api.notesRestore({ noteId });
+            if (!res?.success) return alert(res?.error || '還原失敗');
+            loadNotes();
+        }
+
+        async function notesPurge(noteId) {
+            if (!confirm('永久刪除？')) return;
+            const res = await window.api.notesPurge({ noteId });
+            if (!res?.success) return alert(res?.error || '刪除失敗');
+            loadNotes();
         }
 
         let currentEvents = [];
@@ -2193,6 +2781,42 @@
         let orgContacts = [];
         let contactPickIndex = -1;
         let contactPickField = '';
+        const MAIL_FILTER_COLLAPSE_KEY = 'lifetour-mail-filter-collapsed';
+        let mailFilterCollapsed = (() => {
+            try {
+                const v = localStorage.getItem(MAIL_FILTER_COLLAPSE_KEY);
+                // 預設收合，避免分類過多占版面
+                return v == null ? true : v === '1';
+            } catch (_) { return true; }
+        })();
+
+        function isMailFilterCollapsed() {
+            return !!mailFilterCollapsed;
+        }
+
+        function toggleMailFilterChips() {
+            mailFilterCollapsed = !mailFilterCollapsed;
+            try { localStorage.setItem(MAIL_FILTER_COLLAPSE_KEY, mailFilterCollapsed ? '1' : '0'); } catch (_) {}
+            applyMailFilterCollapseUi();
+        }
+
+        function applyMailFilterCollapseUi() {
+            const bar = document.getElementById('mail-filter-bar');
+            const toggle = document.getElementById('mail-filter-toggle');
+            const chips = document.getElementById('mail-chips');
+            if (!bar || !toggle || !chips) return;
+            const chipCount = chips.querySelectorAll('.chip').length;
+            // 分類很少時不需要收合鈕
+            if (chipCount <= 2) {
+                bar.classList.remove('is-collapsed');
+                toggle.hidden = true;
+                return;
+            }
+            toggle.hidden = false;
+            bar.classList.toggle('is-collapsed', isMailFilterCollapsed());
+            toggle.textContent = isMailFilterCollapsed() ? '展開分類' : '收合';
+            toggle.title = isMailFilterCollapsed() ? '展開全部分類' : '收合分類';
+        }
 
         function updateSyncHint(packet) {
             const hint = document.getElementById('mail-sync-hint');
@@ -2259,6 +2883,7 @@
                     return `<button class="chip ${currentMailLabel === l.id ? 'active' : ''}" onclick="loadGmail('${l.id}')">${escapeHtml(l.name)}${count}</button>`;
                 })
             ].join('');
+            applyMailFilterCollapseUi();
 
             if (!emails.length) {
                 list.innerHTML = res.syncing && !silent
@@ -5016,6 +5641,7 @@
             if (isDev) {
                 await renderSheetSources();
                 await renderSitesVisitsSettings();
+                await reSettingsLoadState();
             }
         }
 
@@ -5604,6 +6230,807 @@
             appendChat('assistant', res.text, res.sources);
             chatHistory.push({ role: 'assistant', text: res.text });
         }
+
+
+        // ========== 【FEATURE: reportExport】SQL 報表匯出 ==========
+        function reEscape(text) {
+            return escapeHtml(String(text ?? ''));
+        }
+
+        function reFormatTs(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return '—';
+            const p = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        }
+
+        let reCatalogState = null;
+        let reCollaborators = [];
+
+        function reToggleCatalogMenu(ev) {
+            ev?.stopPropagation?.();
+            const pop = document.getElementById('re-catalog-pop');
+            if (!pop) return;
+            if (pop.hasAttribute('hidden')) pop.removeAttribute('hidden');
+            else pop.setAttribute('hidden', '');
+        }
+
+        function reCloseCatalogMenu() {
+            document.getElementById('re-catalog-pop')?.setAttribute('hidden', '');
+        }
+
+        function rePaintCatalogUi() {
+            const cat = reCatalogState;
+            const bar = document.getElementById('re-catalog-bar');
+            const label = document.getElementById('re-catalog-label');
+            const collabs = document.getElementById('re-catalog-collabs');
+            const shareBtn = document.getElementById('re-catalog-share-btn');
+            const leaveBtn = document.getElementById('re-catalog-leave-btn');
+            const syncBtn = document.getElementById('re-catalog-sync-btn');
+            const copyBtn = document.getElementById('re-catalog-copy-btn');
+            if (cat?.spreadsheetId) {
+                bar?.removeAttribute('hidden');
+                const roleLabel = cat.role === 'owner' ? 'Owner' : '協作者';
+                const pathHint = cat.folderPath || 'LifeTourTools/SQL報表';
+                if (label) {
+                    label.textContent = `共用報表庫（${roleLabel}）· ${pathHint}`;
+                }
+                const names = (reCollaborators || []).join('、');
+                if (collabs) {
+                    collabs.textContent = names
+                        ? `與 ${names} 共用`
+                        : (cat.role === 'owner' ? '尚未邀請協作者' : `Owner：${cat.ownerEmail || '—'}`);
+                }
+                if (shareBtn) shareBtn.hidden = cat.role !== 'owner';
+                if (leaveBtn) leaveBtn.hidden = cat.role !== 'collaborator';
+                if (syncBtn) syncBtn.hidden = cat.role === 'collaborator';
+                if (copyBtn) copyBtn.hidden = false;
+            } else {
+                bar?.setAttribute('hidden', '');
+                if (shareBtn) shareBtn.hidden = true;
+                if (leaveBtn) leaveBtn.hidden = true;
+                if (syncBtn) syncBtn.hidden = false;
+                if (copyBtn) copyBtn.hidden = true;
+            }
+        }
+
+        async function reSyncCatalogToCloud() {
+            reCloseCatalogMenu();
+            const res = await window.api.reportExportCreateCatalog?.();
+            if (!res?.success) {
+                if (res?.needsAuth || res?.featureScopeMissing) return authorizeFeature?.('reportExport');
+                return alert(res?.error || '同步失敗');
+            }
+            reCatalogState = res.catalog;
+            alert(`已同步到雲端（${res.count ?? ''} 筆啟用中報表）\n路徑：我的雲端硬碟／LifeTourTools／SQL報表`);
+            loadReportExportList();
+        }
+
+        function reCopyCatalogSheetId() {
+            reCloseCatalogMenu();
+            const id = reCatalogState?.spreadsheetId || '';
+            if (!id) return alert('尚未建立共用報表庫');
+            navigator.clipboard?.writeText(id).then(() => alert('已複製 Sheet ID')).catch(() => alert(id));
+        }
+
+        function reJoinCatalog() {
+            reCloseCatalogMenu();
+            notesAskText({
+                title: '加入共享報表庫',
+                label: 'Google 試算表 ID 或網址（必須是 SQL 報表共用庫，不是記事）',
+                placeholder: '貼上 spreadsheetId 或試算表網址',
+                onOk: async (raw) => {
+                    if (!raw) return;
+                    try {
+                        const res = await window.api.reportExportJoinCatalog?.({ spreadsheetId: raw });
+                        if (!res?.success) {
+                            if (res?.needsAuth || res?.featureScopeMissing) return authorizeFeature?.('reportExport');
+                            reCatalogState = null;
+                            alert(res?.error || '加入失敗：格式不符或導入失敗，未寫入本機。');
+                            loadReportExportList();
+                            return;
+                        }
+                        reCatalogState = res.catalog;
+                        loadReportExportList();
+                    } catch (err) {
+                        reCatalogState = null;
+                        alert('加入失敗：' + (err?.message || String(err)) + '\n未寫入本機。');
+                        loadReportExportList();
+                    }
+                }
+            });
+        }
+
+        function reShareCatalogPrompt() {
+            reCloseCatalogMenu();
+            notesAskText({
+                title: '邀請協作者',
+                label: 'Google 帳號 email',
+                placeholder: 'name@company.com',
+                onOk: async (email) => {
+                    if (!email) return;
+                    const res = await window.api.reportExportShare?.({ email });
+                    if (!res?.success) return alert(res?.error || '邀請失敗');
+                    alert(res.message || '已邀請');
+                    loadReportExportList();
+                }
+            });
+        }
+
+        async function reLeaveCatalog() {
+            reCloseCatalogMenu();
+            if (!confirm('確定離開此共享報表庫？本機仍保留上次同步的報表副本。')) return;
+            const res = await window.api.reportExportLeaveCatalog?.();
+            if (!res?.success) return alert(res?.error || '離開失敗');
+            reCatalogState = null;
+            reCollaborators = [];
+            loadReportExportList();
+        }
+
+        document.addEventListener('click', () => reCloseCatalogMenu());
+
+        function reHideAllViews() {
+            document.getElementById('re-list-view')?.setAttribute('hidden', '');
+            document.getElementById('re-detail-view')?.setAttribute('hidden', '');
+            document.getElementById('re-preview-view')?.setAttribute('hidden', '');
+        }
+
+        function reShowList() {
+            reHideAllViews();
+            document.getElementById('re-list-view')?.removeAttribute('hidden');
+            loadReportExportList();
+        }
+
+        function reShowCreate() {
+            reFillForm(null);
+            reHideAllViews();
+            document.getElementById('re-detail-view')?.removeAttribute('hidden');
+            document.getElementById('re-logs-section')?.setAttribute('hidden', '');
+            reApplyDevUi();
+        }
+
+        async function reShowDetail(id) {
+            const res = await window.api.reportExportGet?.(id);
+            if (!res?.success) {
+                alert(res?.error || '無法載入報表');
+                return;
+            }
+            reFillForm(res.report);
+            reHideAllViews();
+            document.getElementById('re-detail-view')?.removeAttribute('hidden');
+            document.getElementById('re-logs-section')?.removeAttribute('hidden');
+            reApplyDevUi();
+            await loadReportExportLogs(id);
+        }
+
+        function reClosePreview() {
+            document.getElementById('re-preview-view')?.setAttribute('hidden', '');
+            document.getElementById('re-detail-view')?.removeAttribute('hidden');
+        }
+
+        // ---------- App 設定 → 開發者：SQL 測試／正式連線 ----------
+        let reSettingsEditingProfile = 'test';
+        let reSettingsCache = null;
+
+        function reSettingsPaintTabs() {
+            const testBtn = document.getElementById('re-set-tab-test');
+            const prodBtn = document.getElementById('re-set-tab-prod');
+            testBtn?.classList.toggle('active', reSettingsEditingProfile === 'test');
+            prodBtn?.classList.toggle('active', reSettingsEditingProfile === 'production');
+        }
+
+        function reSettingsLoadIntoForm(profileKey) {
+            const key = profileKey === 'production' ? 'production' : 'test';
+            const p = reSettingsCache?.[key] || {};
+            const conn = document.getElementById('re-set-sql-conn');
+            const server = document.getElementById('re-set-sql-server');
+            const port = document.getElementById('re-set-sql-port');
+            const database = document.getElementById('re-set-sql-database');
+            const user = document.getElementById('re-set-sql-user');
+            const password = document.getElementById('re-set-sql-password');
+            if (conn) conn.value = p.sqlConnectionString || '';
+            if (server) server.value = p.sqlServer || '';
+            if (port) port.value = p.sqlPort || 1433;
+            if (database) database.value = p.sqlDatabase || '';
+            if (user) user.value = p.sqlUser || '';
+            if (password) {
+                password.value = '';
+                password.placeholder = p.hasSqlPassword ? '已儲存密碼，若要更換再填' : '貼上密碼';
+            }
+            const hint = document.getElementById('re-set-active-hint');
+            const active = reSettingsCache?.activeProfile || 'test';
+            const label = key === 'production' ? '正式' : '測試';
+            const activeLabel = active === 'production' ? '正式' : '測試';
+            if (hint) {
+                hint.textContent = `正在編輯：${label}連線。`
+                    + (reSettingsCache?.packaged
+                        ? '安裝包執行一律用測試連線。'
+                        : '預覽／測試產生→測試；立即丟檔／排程→正式。');
+            }
+            reSettingsPaintTabs();
+        }
+
+        async function reSettingsLoadState() {
+            const status = document.getElementById('re-set-sql-status');
+            const res = await window.api.reportExportGetSqlConfig?.();
+            if (!res?.success) {
+                if (status) status.textContent = res?.error || '無法載入 SQL 連線';
+                return;
+            }
+            reSettingsCache = res;
+            if (!reSettingsEditingProfile) reSettingsEditingProfile = 'test';
+            // 安裝包不應看到此區；若仍載入則只顯示測試
+            if (res.packaged) reSettingsEditingProfile = 'test';
+            reSettingsLoadIntoForm(reSettingsEditingProfile);
+            if (status) {
+                status.textContent = res.packaged
+                    ? '安裝包固定使用測試連線。'
+                    : '請分別儲存「測試」與「正式」連線。預覽／測試產生用測試；立即丟檔用正式。';
+            }
+        }
+
+        function reSettingsSelectProfile(profile) {
+            reSettingsEditingProfile = profile === 'production' ? 'production' : 'test';
+            reSettingsLoadIntoForm(reSettingsEditingProfile);
+        }
+
+        async function reSettingsSaveProfile() {
+            const profile = reSettingsEditingProfile === 'production' ? 'production' : 'test';
+            const res = await window.api.reportExportSaveSqlConfig?.({
+                profile,
+                sqlConnectionString: document.getElementById('re-set-sql-conn')?.value.trim() || '',
+                sqlServer: document.getElementById('re-set-sql-server')?.value.trim() || '',
+                sqlPort: Number(document.getElementById('re-set-sql-port')?.value) || 1433,
+                sqlDatabase: document.getElementById('re-set-sql-database')?.value.trim() || '',
+                sqlUser: document.getElementById('re-set-sql-user')?.value.trim() || '',
+                sqlPassword: document.getElementById('re-set-sql-password')?.value || undefined
+            });
+            if (!res?.success) {
+                alert(res?.error || '儲存失敗');
+                return;
+            }
+            reSettingsCache = res;
+            const password = document.getElementById('re-set-sql-password');
+            if (password) password.value = '';
+            reSettingsLoadIntoForm(profile);
+            const status = document.getElementById('re-set-sql-status');
+            if (status) status.textContent = `${profile === 'production' ? '正式' : '測試'}連線已儲存。`;
+        }
+
+        async function reSettingsUseProfile() {
+            const profile = reSettingsEditingProfile === 'production' ? 'production' : 'test';
+            const res = await window.api.reportExportSetSqlProfile?.(profile);
+            if (!res?.success) {
+                alert(res?.error || '無法切換執行用連線');
+                return;
+            }
+            reSettingsCache = res;
+            reSettingsLoadIntoForm(profile);
+            const status = document.getElementById('re-set-sql-status');
+            if (status) {
+                status.textContent = `已設為執行用：${profile === 'production' ? '正式' : '測試'}連線。`;
+            }
+        }
+
+        function reApplyDevUi() {
+            const out = document.getElementById('re-output-section');
+            if (out) out.hidden = !appIsDev;
+            // [Important] 立即丟檔僅 npm start 開發者模式；正式安裝包只靠排程
+            const runBtn = document.getElementById('re-btn-run');
+            if (runBtn) runBtn.hidden = !appIsDev;
+            const testBtn = document.getElementById('re-btn-test');
+            if (testBtn) testBtn.hidden = false;
+        }
+
+        function reSelectedRadio(name, fallback) {
+            const el = document.querySelector(`input[name="${name}"]:checked`);
+            return el ? el.value : fallback;
+        }
+
+        function reSetRadio(name, value) {
+            const allowed = {
+                're-overwrite': ['Overwrite', 'AppendTimestamp', 'FailIfExists'],
+                're-output-type': ['Local', 'GoogleDrive'],
+                're-sched-type': ['EveryNMinutes', 'EveryNHours', 'Daily', 'Weekly', 'Monthly']
+            };
+            const list = allowed[name];
+            let v = String(value ?? '');
+            if (list && !list.includes(v)) v = list[0];
+            const nodes = document.querySelectorAll(`input[name="${name}"]`);
+            for (const el of nodes) {
+                if (el.value === v) {
+                    el.checked = true;
+                    return;
+                }
+            }
+        }
+
+        function reNormalizeReport(report) {
+            if (!report) return report;
+            const OVERWRITE = ['Overwrite', 'AppendTimestamp', 'FailIfExists'];
+            const OUT = ['Local', 'GoogleDrive'];
+            const r = { ...report };
+            const looksSql = (s) => /\b(SELECT|DECLARE|USE)\b/i.test(String(s || ''));
+            if (looksSql(r.outputType)) {
+                if (!looksSql(r.sqlQuery) || String(r.sqlQuery || '').length < String(r.outputType).length) {
+                    r.sqlQuery = r.outputType;
+                }
+                if (typeof r.overwriteMode === 'string' && r.overwriteMode.trim().startsWith('{')) {
+                    try { r.outputConfig = { ...(r.outputConfig || {}), ...JSON.parse(r.overwriteMode) }; } catch (_) {}
+                }
+                r.outputType = r.outputConfig?.folderId ? 'GoogleDrive' : 'Local';
+                r.overwriteMode = 'Overwrite';
+            }
+            if (typeof r.overwriteMode === 'string' && r.overwriteMode.trim().startsWith('{')) {
+                try { r.outputConfig = { ...JSON.parse(r.overwriteMode), ...(r.outputConfig || {}) }; } catch (_) {}
+                r.overwriteMode = 'Overwrite';
+            }
+            if (!OUT.includes(r.outputType)) r.outputType = r.outputConfig?.folderId ? 'GoogleDrive' : 'Local';
+            if (!OVERWRITE.includes(r.overwriteMode)) r.overwriteMode = 'Overwrite';
+            if (!r.outputConfig || typeof r.outputConfig !== 'object') r.outputConfig = {};
+            return r;
+        }
+
+        function reFillForm(report) {
+            report = reNormalizeReport(report);
+            document.getElementById('re-id').value = report?.id || '';
+            document.getElementById('re-name').value = report?.reportName || '';
+            document.getElementById('re-dept').value = report?.department || '';
+            document.getElementById('re-desc').value = report?.description || '';
+            document.getElementById('re-file-base').value = report?.fileNameBase || '';
+            const localPath = document.getElementById('re-local-path');
+            const driveFolderId = document.getElementById('re-drive-folder-id');
+            const driveFolderName = document.getElementById('re-drive-folder-name');
+            const driveTestId = document.getElementById('re-drive-test-id');
+            const driveTestName = document.getElementById('re-drive-test-name');
+            if (localPath) localPath.value = report?.outputConfig?.localPath || '';
+            if (driveFolderId) driveFolderId.value = report?.outputConfig?.folderId || '';
+            if (driveFolderName) driveFolderName.value = report?.outputConfig?.folderName || '';
+            if (driveTestId) driveTestId.value = report?.outputConfig?.testFolderId || '';
+            if (driveTestName) driveTestName.value = report?.outputConfig?.testFolderName || '';
+            document.getElementById('re-sql').value = report?.sqlQuery || '';
+            reSetRadio('re-output-type', report?.outputType === 'GoogleDrive' ? 'GoogleDrive' : 'Local');
+            reSetRadio('re-overwrite', report?.overwriteMode || 'Overwrite');
+            const schedOn = !!report?.scheduleEnabled;
+            const en = document.getElementById('re-schedule-enabled');
+            if (en) en.checked = schedOn;
+            const sched = report?.schedule || { type: 'Daily', time: '16:00', interval: 5, weekDays: [1], dayOfMonth: 1 };
+            reSetRadio('re-sched-type', sched.type || 'Daily');
+            document.getElementById('re-sched-interval').value = sched.interval || 5;
+            document.getElementById('re-sched-time').value = sched.time || '16:00';
+            document.getElementById('re-sched-dom').value = sched.dayOfMonth || 1;
+            // 僅帶入已存的 startAt；勿用 nextRunAt 填入，否則一儲存會被當成排程變更而重算「下次」
+            const startEl = document.getElementById('re-sched-start-at');
+            if (startEl) startEl.value = reToDatetimeLocal(sched.startAt || '');
+            document.querySelectorAll('.re-weekday').forEach((cb) => {
+                cb.checked = (sched.weekDays || []).map(Number).includes(Number(cb.value));
+            });
+            reOnScheduleToggle();
+            reOnScheduleTypeChange();
+            reOnOutputTypeChange();
+            if (appIsDev) reRefreshDriveAccount();
+            reApplyDevUi();
+        }
+
+        function reToDatetimeLocal(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return '';
+            const p = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+        }
+
+        function reFromDatetimeLocal(val) {
+            const raw = String(val || '').trim();
+            if (!raw) return '';
+            const d = new Date(raw);
+            return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+        }
+
+        function reCollectPayload() {
+            const weekDays = [...document.querySelectorAll('.re-weekday:checked')].map((cb) => Number(cb.value));
+            const scheduleEnabled = !!document.getElementById('re-schedule-enabled')?.checked;
+            const payload = {
+                reportName: document.getElementById('re-name')?.value || '',
+                department: document.getElementById('re-dept')?.value || '',
+                description: document.getElementById('re-desc')?.value || '',
+                fileNameBase: document.getElementById('re-file-base')?.value || '',
+                sqlQuery: document.getElementById('re-sql')?.value || '',
+                scheduleEnabled,
+                schedule: {
+                    type: reSelectedRadio('re-sched-type', 'Daily'),
+                    interval: Number(document.getElementById('re-sched-interval')?.value) || 5,
+                    time: document.getElementById('re-sched-time')?.value || '16:00',
+                    weekDays: weekDays.length ? weekDays : [1],
+                    dayOfMonth: Number(document.getElementById('re-sched-dom')?.value) || 1,
+                    startAt: reFromDatetimeLocal(document.getElementById('re-sched-start-at')?.value || ''),
+                    timezone: 'Asia/Taipei'
+                },
+                dateParams: { mode: 'None' },
+                enabled: true
+            };
+            // [Important] 發布版不送輸出設定，避免覆寫開發者已設的 Local／Drive
+            if (appIsDev) {
+                const outputType = reSelectedRadio('re-output-type', 'Local');
+                payload.outputType = outputType;
+                payload.overwriteMode = reSelectedRadio('re-overwrite', 'Overwrite');
+                payload.outputConfig = outputType === 'GoogleDrive'
+                    ? {
+                        folderId: document.getElementById('re-drive-folder-id')?.value || '',
+                        folderName: document.getElementById('re-drive-folder-name')?.value || '',
+                        testFolderId: document.getElementById('re-drive-test-id')?.value || '',
+                        testFolderName: document.getElementById('re-drive-test-name')?.value || ''
+                    }
+                    : {
+                        localPath: document.getElementById('re-local-path')?.value || ''
+                    };
+            }
+            return payload;
+        }
+
+        function reOnOutputTypeChange() {
+            const type = reSelectedRadio('re-output-type', 'Local');
+            const local = document.getElementById('re-local-fields');
+            const drive = document.getElementById('re-drive-fields');
+            if (local) local.hidden = type !== 'Local';
+            if (drive) drive.hidden = type !== 'GoogleDrive';
+            if (type === 'GoogleDrive') reRefreshDriveAccount();
+        }
+
+        async function reRefreshDriveAccount() {
+            const el = document.getElementById('re-drive-account');
+            if (!el) return;
+            const res = await window.api.reportExportAuthStatus?.();
+            if (!res?.success) {
+                el.textContent = 'Google 帳號：無法檢查授權';
+                return;
+            }
+            const email = res.email || '（已登入）';
+            el.textContent = res.hasDriveFileScope
+                ? `Google 帳號：${email}（雲端硬碟已授權）`
+                : `Google 帳號：${email || '未確認'}（尚未授權雲端硬碟）`;
+        }
+
+        async function reEnsureDriveAuth() {
+            const ok = await ensureFeatureAuthorized('reportExport');
+            if (!ok) {
+                alert('需要雲端硬碟權限才能上傳報表');
+                return false;
+            }
+            await reRefreshDriveAccount();
+            return true;
+        }
+
+        async function reHandleDriveAuthError(res) {
+            if (res?.featureScopeMissing || res?.needsAuth) {
+                const ok = await reEnsureDriveAuth();
+                return ok;
+            }
+            return false;
+        }
+
+        async function reResolveDriveFolder(kind) {
+            const idEl = document.getElementById(kind === 'test' ? 're-drive-test-id' : 're-drive-folder-id');
+            const nameEl = document.getElementById(kind === 'test' ? 're-drive-test-name' : 're-drive-folder-name');
+            const raw = idEl?.value || '';
+            if (!raw.trim()) {
+                alert('請先貼上 Folder ID 或資料夾網址');
+                return;
+            }
+            if (!(await reEnsureDriveAuth())) return;
+            const res = await window.api.reportExportDriveResolveFolder?.({ folderIdOrUrl: raw });
+            if (!res?.success) {
+                if (await reHandleDriveAuthError(res)) {
+                    return reResolveDriveFolder(kind);
+                }
+                alert(res?.error || '無法驗證資料夾');
+                return;
+            }
+            if (idEl) idEl.value = res.folderId || '';
+            if (nameEl) nameEl.value = res.folderName || '';
+            alert(`已驗證資料夾：${res.folderName}`);
+        }
+
+        async function rePickDriveFolder(kind) {
+            if (!(await reEnsureDriveAuth())) return;
+            const action = prompt(
+                '請選擇操作：\n1 = 列出 App 可見資料夾並選取\n2 = 建立新資料夾\n（直接取消結束）',
+                '2'
+            );
+            if (action === null) return;
+            if (String(action).trim() === '1') {
+                const list = await window.api.reportExportDriveListFolders?.();
+                if (!list?.success) {
+                    if (await reHandleDriveAuthError(list)) return rePickDriveFolder(kind);
+                    alert(list?.error || '無法列出資料夾');
+                    return;
+                }
+                const folders = list.folders || [];
+                if (!folders.length) {
+                    alert('目前沒有 App 可見的資料夾，請改用「建立新資料夾」或貼上 Folder ID。');
+                    return;
+                }
+                const lines = folders.map((f, i) => `${i + 1}. ${f.folderName} (${f.folderId})`).join('\n');
+                const pick = prompt(`輸入序號選擇資料夾：\n${lines}`, '1');
+                if (pick === null) return;
+                const idx = Number(pick) - 1;
+                const chosen = folders[idx];
+                if (!chosen) {
+                    alert('序號無效');
+                    return;
+                }
+                const idEl = document.getElementById(kind === 'test' ? 're-drive-test-id' : 're-drive-folder-id');
+                const nameEl = document.getElementById(kind === 'test' ? 're-drive-test-name' : 're-drive-folder-name');
+                if (idEl) idEl.value = chosen.folderId;
+                if (nameEl) nameEl.value = chosen.folderName;
+                return;
+            }
+            const defaultName = kind === 'test' ? 'LifeTour Report Test' : 'LifeTour Reports';
+            const name = prompt('新資料夾名稱', defaultName);
+            if (name === null) return;
+            const created = await window.api.reportExportDriveCreateFolder?.({ name: name.trim() || defaultName });
+            if (!created?.success) {
+                if (await reHandleDriveAuthError(created)) return rePickDriveFolder(kind);
+                alert(created?.error || '建立失敗');
+                return;
+            }
+            const idEl = document.getElementById(kind === 'test' ? 're-drive-test-id' : 're-drive-folder-id');
+            const nameEl = document.getElementById(kind === 'test' ? 're-drive-test-name' : 're-drive-folder-name');
+            if (idEl) idEl.value = created.folderId || '';
+            if (nameEl) nameEl.value = created.folderName || '';
+            alert(`已建立：${created.folderName}`);
+        }
+
+        function reOnScheduleToggle() {
+            const on = !!document.getElementById('re-schedule-enabled')?.checked;
+            const box = document.getElementById('re-schedule-fields');
+            if (box) box.hidden = !on;
+        }
+
+        function reOnScheduleTypeChange() {
+            const type = reSelectedRadio('re-sched-type', 'Daily');
+            const intervalWrap = document.getElementById('re-sched-interval-wrap');
+            const timeWrap = document.getElementById('re-sched-time-wrap');
+            const weekWrap = document.getElementById('re-sched-week-wrap');
+            const domWrap = document.getElementById('re-sched-dom-wrap');
+            if (intervalWrap) intervalWrap.hidden = !(type === 'EveryNMinutes' || type === 'EveryNHours');
+            if (timeWrap) timeWrap.hidden = type === 'EveryNMinutes' || type === 'EveryNHours';
+            if (weekWrap) weekWrap.hidden = type !== 'Weekly';
+            if (domWrap) domWrap.hidden = type !== 'Monthly';
+        }
+
+        async function rePickLocalFolder() {
+            const res = await window.api.reportExportPickLocalFolder?.();
+            if (res?.cancelled) return;
+            if (!res?.success) {
+                alert(res?.error || '無法選擇資料夾');
+                return;
+            }
+            document.getElementById('re-local-path').value = res.path || '';
+        }
+
+        async function reSave() {
+            const id = document.getElementById('re-id')?.value || '';
+            const payload = reCollectPayload();
+            const res = id
+                ? await window.api.reportExportUpdate?.(id, payload)
+                : await window.api.reportExportCreate?.(payload);
+            if (!res?.success) {
+                alert(res?.error || '儲存失敗');
+                return null;
+            }
+            document.getElementById('re-id').value = res.report.id;
+            document.getElementById('re-logs-section')?.removeAttribute('hidden');
+            return res.report;
+        }
+
+        async function rePreview() {
+            const id = document.getElementById('re-id')?.value || '';
+            const sql = document.getElementById('re-sql')?.value || '';
+            const view = document.getElementById('re-preview-view');
+            const meta = document.getElementById('re-preview-meta');
+            const table = document.getElementById('re-preview-table');
+            document.getElementById('re-list-view')?.setAttribute('hidden', '');
+            document.getElementById('re-detail-view')?.setAttribute('hidden', '');
+            view?.removeAttribute('hidden');
+            if (meta) meta.textContent = '查詢中…';
+            if (table) table.innerHTML = '<div class="loading">查詢中…</div>';
+            const res = await window.api.reportExportPreview?.({ id, sql, limit: 100 });
+            if (!res?.success) {
+                if (meta) meta.textContent = '預覽失敗';
+                if (table) table.innerHTML = `<div class="loading">${reEscape(res?.error || '預覽失敗')}</div>`;
+                return;
+            }
+            if (meta) {
+                meta.textContent = `（測試連線）預覽 ${res.rows?.length || 0} 筆`
+                    + (res.truncated ? `（已限制 ${res.limit}）` : '');
+            }
+            if (table) table.innerHTML = reRenderDataTable(res.columns || [], res.rows || []);
+        }
+
+        async function reExecute(mode) {
+            const saved = await reSave();
+            if (!saved) return;
+            if (saved.outputType === 'GoogleDrive' && !(await reEnsureDriveAuth())) return;
+            const label = mode === 'Test' ? '測試產生（測試連線／測試資料夾）' : '立即丟檔（正式連線／正式資料夾）';
+            if (!confirm(`確定要${label}「${saved.reportName}」嗎？`)) return;
+            const res = await window.api.reportExportExecute?.({ id: saved.id, mode });
+            if (!res?.success) {
+                if (await reHandleDriveAuthError(res)) {
+                    return reExecute(mode);
+                }
+                alert((mode === 'Test' ? '測試失敗：' : '丟檔失敗：') + (res?.error || '未知錯誤'));
+                await loadReportExportLogs(saved.id);
+                return;
+            }
+            let msg = `報表產生成功\n檔案：${res.fileName}\n筆數：${res.recordCount ?? 0}`;
+            if (res.destinationType === 'GoogleDrive') {
+                msg += `\n目的地：Google Drive\nFile ID：${res.googleDriveFileId || ''}`;
+            } else {
+                msg += `\n路徑：${res.filePath || ''}`;
+            }
+            alert(msg);
+            await loadReportExportLogs(saved.id);
+        }
+
+        async function reDelete(id, name) {
+            if (!confirm(`確定停用報表「${name || id}」？`)) return;
+            const res = await window.api.reportExportDelete?.(id);
+            if (!res?.success) {
+                alert(res?.error || '刪除失敗');
+                return;
+            }
+            loadReportExportList();
+        }
+
+        function reRenderDataTable(columns, rows) {
+            if (!columns.length) {
+                return `<div class="loading">沒有資料</div>`;
+            }
+            const head = columns.map((c) => `<th>${reEscape(c)}</th>`).join('');
+            const body = rows.map((row) => {
+                const cells = columns.map((c) => `<td title="${reEscape(row[c])}">${reEscape(row[c])}</td>`).join('');
+                return `<tr>${cells}</tr>`;
+            }).join('');
+            return `<table class="re-table"><thead><tr>${head}</tr></thead><tbody>${body || '<tr><td colspan="' + columns.length + '">（無列）</td></tr>'}</tbody></table>`;
+        }
+
+        async function loadReportExportList() {
+            const box = document.getElementById('re-list-table');
+            if (!box) return;
+            const res = await window.api.reportExportList?.();
+            if (!res?.success) {
+                box.innerHTML = `<div class="loading">${reEscape(res?.error || '載入失敗')}</div>`;
+                return;
+            }
+            reCatalogState = res.catalog || null;
+            reCollaborators = res.collaborators || [];
+            rePaintCatalogUi();
+            const reports = res.reports || [];
+            if (!reports.length) {
+                box.innerHTML = `<div class="loading">尚無報表。請按「新增報表」。</div>`;
+                return;
+            }
+            box.innerHTML = `<table class="re-table">
+                <thead><tr>
+                    <th>報表名稱</th><th>需求單位</th><th>檔名</th>
+                    <th>排程</th><th>上次丟檔</th><th>下次</th><th>結果</th><th>操作</th>
+                </tr></thead>
+                <tbody>${reports.map((r) => {
+                    const status = r.lastStatus === 'Success'
+                        ? '<span class="re-status-ok">成功</span>'
+                        : (r.lastStatus === 'Failed' ? '<span class="re-status-fail">失敗</span>' : '—');
+                    const sched = r.scheduleEnabled ? reEscape(r.scheduleSummary || '開啟') : '關閉';
+                    const idJs = JSON.stringify(r.id);
+                    const nameJs = JSON.stringify(r.reportName || '');
+                    return `<tr>
+                        <td>${reEscape(r.reportName)}</td>
+                        <td>${reEscape(r.department)}</td>
+                        <td>${reEscape(r.fileNameBase)}</td>
+                        <td>${sched}</td>
+                        <td>${reFormatTs(r.lastRunAt)}</td>
+                        <td>${reFormatTs(r.nextRunAt)}</td>
+                        <td>${status}</td>
+                        <td class="re-actions">
+                            <button type="button" class="btn-ghost re-action-btn" onclick='reShowDetail(${idJs})'>詳細</button>
+                            <button type="button" class="btn-ghost re-action-btn re-action-danger" onclick='reDelete(${idJs}, ${nameJs})'>停用</button>
+                        </td>
+                    </tr>`;
+                }).join('')}</tbody></table>`;
+        }
+
+        async function reQuickRun(id) {
+            if (!appIsDev) {
+                alert('「立即丟檔」僅開發者模式可用');
+                return;
+            }
+            if (!confirm('確定要立即丟檔（正式連線／正式資料夾）嗎？')) return;
+            const detail = await window.api.reportExportGet?.(id);
+            if (detail?.success && detail.report?.outputType === 'GoogleDrive') {
+                if (!(await reEnsureDriveAuth())) return;
+            }
+            const res = await window.api.reportExportExecute?.({ id, mode: 'Manual' });
+            if (!res?.success) {
+                if (await reHandleDriveAuthError(res)) {
+                    return reQuickRun(id);
+                }
+                alert('丟檔失敗：' + (res?.error || '未知錯誤'));
+                loadReportExportList();
+                return;
+            }
+            let msg = `報表產生成功\n檔案：${res.fileName}\n筆數：${res.recordCount ?? 0}`;
+            if (res.destinationType === 'GoogleDrive') {
+                msg += `\nFile ID：${res.googleDriveFileId || ''}`;
+            }
+            alert(msg);
+            loadReportExportList();
+        }
+
+        async function loadReportExportLogs(id) {
+            const box = document.getElementById('re-logs-table');
+            if (!box) return;
+            const res = await window.api.reportExportExecutions?.({ id, limit: 30 });
+            if (!res?.success) {
+                box.innerHTML = `<div class="loading">${reEscape(res?.error || '無法載入紀錄')}</div>`;
+                return;
+            }
+            const logs = res.logs || [];
+            if (!logs.length) {
+                box.innerHTML = `<div class="loading">尚無執行紀錄</div>`;
+                return;
+            }
+            box.innerHTML = `<table class="re-table">
+                <thead><tr><th>執行時間</th><th>方式</th><th>筆數</th><th>檔案</th><th>結果</th><th>耗時</th><th>訊息</th></tr></thead>
+                <tbody>${logs.map((l) => {
+                    const st = l.status === 'Success'
+                        ? '<span class="re-status-ok">成功</span>'
+                        : (l.status === 'Failed' ? '<span class="re-status-fail">失敗</span>' : reEscape(l.status));
+                    const ms = l.durationMs != null ? `${(l.durationMs / 1000).toFixed(1)}s` : '—';
+                    return `<tr>
+                        <td>${reFormatTs(l.startTime)}</td>
+                        <td>${reEscape(l.executionType)}</td>
+                        <td>${l.recordCount ?? '—'}</td>
+                        <td title="${reEscape(l.filePath || l.googleDriveFileId || '')}">${reEscape(l.fileName || '—')}</td>
+                        <td>${st}</td>
+                        <td>${ms}</td>
+                        <td title="${reEscape(l.errorMessage || '')}">${reEscape(l.errorMessage || '')}</td>
+                    </tr>`;
+                }).join('')}</tbody></table>`;
+        }
+
+        async function mountReportExport() {
+            const root = document.getElementById('re-root');
+            if (!root) return;
+            reApplyDevUi();
+            reShowList();
+            reEnsureListAutoRefresh();
+        }
+
+        // [Important] 列表上次／下次不會因背景排程自動重畫；10 分鐘補刷，執行完成也會推事件
+        const RE_LIST_REFRESH_MS = 10 * 60 * 1000;
+        let reListRefreshTimer = null;
+
+        function reEnsureListAutoRefresh() {
+            if (reListRefreshTimer) return;
+            reListRefreshTimer = setInterval(() => {
+                if (!document.getElementById('re-root')) return;
+                const listView = document.getElementById('re-list-view');
+                if (listView && !listView.hasAttribute('hidden')) {
+                    loadReportExportList();
+                }
+            }, RE_LIST_REFRESH_MS);
+        }
+
+        function reOnListChangedFromMain() {
+            if (!document.getElementById('re-root')) return;
+            const listView = document.getElementById('re-list-view');
+            if (listView && !listView.hasAttribute('hidden')) {
+                loadReportExportList();
+            }
+        }
+
+        window.api.onReportExportListChanged?.(reOnListChangedFromMain);
 
 
         // ========== 【MODULE: Authorization】登出 ==========

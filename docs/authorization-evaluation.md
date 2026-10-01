@@ -115,10 +115,10 @@ Renderer window.onload
 | 功能 | Scope（摘要） | 備註 |
 |---|---|---|
 | calendar | `auth/calendar` | — |
-| tasks | `auth/tasks` | — |
 | gmail | `gmail.modify` + contacts ×2 | contacts 與 gchat 重複 |
 | gchat | Chat 7 項 + `directory.readonly` + `contacts.readonly` | 判定邏輯與實際 scope 不一致（見問題 #11） |
 | sheets | `spreadsheets` + `drive.file` | — |
+| notes | `spreadsheets` + `drive.file` | 記事（與 sheets 共用） |
 | sitesVisits | `spreadsheets` | 與 sheets 完全重複 |
 | chat（Gemini） | `cloud-platform` | 範圍偏大 |
 

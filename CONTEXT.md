@@ -1,8 +1,26 @@
 # LifeTour
 
-Desktop productivity hub that integrates Google workspace features and internal tools. This glossary covers product language for the app. Active design work spans Little Reply (Reply Bar／Toast 提醒、@ 真提及／僅參考標籤), Google authorization / session, and 9527 Sheets Inbox.
+Desktop productivity hub that integrates Google workspace features and internal tools. This glossary covers product language for the app. Active design work spans 記事 (Sheets by spreadsheetId + local ID index), Mosaic Active Features（加入／移除與背景生命週期）, Little Reply (Reply Bar／Toast 提醒、@ 真提及／僅參考標籤), Google authorization / session, and 9527 Sheets Inbox.
 
 ## Language
+
+### Mosaic & Active Features
+
+**Active Feature**:
+A Mosaic catalog feature currently placed on the workspace board (the user has「加入功能」). Only Active Features may run that feature's background work.
+_Avoid_: treating Google Session or granted scopes alone as “the feature is on”; conflating Toast／alertPopup prefs with Active Feature membership
+
+**Feature On**:
+Adding a feature tile to the Mosaic so it becomes an Active Feature and may immediately start that feature's background work (subject to Feature Scope Gate).
+_Avoid_: “enable”, “install”, “authorize” (those mean prefs, packaging, or OAuth)
+
+**Feature Off**:
+Removing a feature tile from the Mosaic so it is no longer an Active Feature: that feature's background work must stop, and must not revive on restart until Feature On again. For Little Reply this also means destroying Reply Pop／Reply Bar／Quick Search and disabling related global shortcuts; Google Session and Credential stay.
+_Avoid_: Logout; turning off Toast alone; “disable packaging flag” (dist-features)
+
+**Active Feature List**:
+The set of Active Feature type ids derived from the current Mosaic layout. The Renderer owns the layout and pushes this list to Main; Main must not start feature background work before receiving it.
+_Avoid_: a second persistent “enabled features” store in Main that drifts from Mosaic; inferring activity only from OAuth scopes
 
 ### Google Authorization & Session
 
@@ -127,6 +145,24 @@ _Avoid_: @ tag（含糊）, mention（未區分是否在群組）
 **僅參考標籤**:
 In a group Space, an @-shaped label for someone who is **not** in that Space. It is reference text only: looks like `@名字`, does **not** notify and must **not** invite them into the Space. UI chip is dashed / muted.
 _Avoid_: 假 @, 無效 mention（易誤解成錯誤）；邀請（禁止由此路徑發生）
+
+### 記事
+
+**記事**:
+LifeTour’s checklist mosaic feature. Each note is one Google Spreadsheet addressed by **spreadsheetId**; a local ID index makes the list fast. Not Keep webview and not Keep API import.
+_Avoid_: Drive.files.list to discover notes; Keep OAuth scopes
+
+**Note Spreadsheet**:
+The Google Spreadsheet file for exactly one 清單筆記. Read／write／share target that spreadsheetId only.
+_Avoid_: scanning the whole Drive; one mega-sheet for all notes as the default
+
+**Join Shared Note**:
+Adding a shared Note Spreadsheet to the local index by pasting its spreadsheetId or Sheets URL after the owner shared the sheet.
+_Avoid_: requiring Drive listing to find shared notes
+
+**Keep Import**:
+Unavailable（Google blocks auth/keep for this OAuth client）. See ADR 0012.
+_Avoid_: requesting auth/keep in Full Login
 
 ### 9527 Sheets Inbox
 

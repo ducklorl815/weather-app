@@ -2,11 +2,12 @@
   "_comment": "[Manual] 加入功能左側打勾＝正式版會提供。未勾＝僅 npm start 可測，正式安裝包不會出現。",
   "widgets": {
     "calendar": true,
-    "tasks": true,
     "gmail": true,
     "gchat": true,
     "sheets": true,
+    "notes": true,
     "sitesVisits": false,
-    "chat": false
+    "chat": false,
+    "reportExport": true
   }
 }

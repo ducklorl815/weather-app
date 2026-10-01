@@ -1,0 +1,21 @@
+<!--
+  ============================================================================
+  Partial View: 記事 (notes)
+  ----------------------------------------------------------------------------
+  分頁＝各主題；右側正方形 + 新增主題。編輯區專注清單，進階設定收合。
+  ============================================================================
+-->
+<div class="notes-shell" id="notes-shell">
+  <div class="notes-tabs-row">
+    <div class="notes-tabs" id="notes-tabs" role="tablist"></div>
+    <button type="button" class="notes-add-topic" id="notes-add-topic" title="新增主題" onclick="notesCreate()">+</button>
+    <button type="button" class="notes-menu-btn" id="notes-menu-btn" title="更多" onclick="notesToggleMenu(event)">⋯</button>
+  </div>
+  <div class="notes-menu-pop" id="notes-menu-pop" hidden>
+    <button type="button" class="notes-menu-item" onclick="notesMenuAction('trash')">垃圾桶</button>
+    <button type="button" class="notes-menu-item" onclick="notesMenuAction('join')">加入共享</button>
+  </div>
+  <div class="notes-body card-body" id="notes-root">
+    <div class="loading">載入記事…</div>
+  </div>
+</div>

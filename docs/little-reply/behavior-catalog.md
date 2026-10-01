@@ -70,8 +70,15 @@ Glossary: **真提及**、**僅參考標籤** in root `CONTEXT.md`.
 
 - **Toast Dedupe Owner = Main** (`notifyNewGchatAlerts` + `mainGchatAlerted*`).
 - Renderer does **not** maintain a second alerted-id set or call show-toast from list polling.
-- Pref `alertPopup` still toggled from settings; watch/start remains Main-driven.
+- Pref `alertPopup` still toggled from settings; watch/start remains Main-driven **only while Little Reply is an Active Feature**.
 - Suppress rules (viewing same Space, minimized bar badge vs new Toast, etc.) stay in Main.
+
+## Active Feature gate
+
+- Little Reply background (sync scheduler, Toast／Reply Bar Alert, Quick Search) runs only when **gchat** is an **Active Feature** (Mosaic tile present). See ADR 0006 / `CONTEXT.md` Active Features.
+- **Feature Off** (remove tile): stop scheduler, destroy Reply Pop／Reply Bar／Quick Search, clear alert／interest memory; Session／Credential／disk packet kept. `alertPopup` pref unchanged.
+- **Feature On** (add tile): wake background immediately (subject to Feature Scope Gate).
+- Main must receive Active Feature List from Renderer before starting Little Reply background; Session／OAuth success alone must not start it.
 
 ---
 

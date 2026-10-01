@@ -13,7 +13,7 @@ renderer/
 │   └── app.js             # mosaic / auth / catalog / 暫存功能邏輯
 └── features/
     ├── calendar/          # 預定行程
-    ├── tasks/             # 待辦
+    ├── notes/             # 記事
     ├── gmail/             # 郵件
     ├── gchat/             # Little Reply
     ├── sheets/            # 9527

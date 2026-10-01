@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld('api', {
   // ---------------------------------------------------------------------------
   loadFeaturePartial: (type) => ipcRenderer.invoke('load-feature-partial', type),
 
+  // Active Features（ADR 0006：mosaic 加入／移除 → Main 背景閘門）
+  setActiveFeatures: (types) => ipcRenderer.invoke('set-active-features', types),
+  getActiveFeatures: () => ipcRenderer.invoke('get-active-features'),
+
   // 系統與登入功能
   fetchWeather: (url) => ipcRenderer.invoke('fetch-weather', url),
   checkLogin: () => ipcRenderer.invoke('check-login'),
@@ -195,10 +199,23 @@ contextBridge.exposeInMainWorld('api', {
   sitesVisitsRecord: (payload) => ipcRenderer.invoke('sites-visits-record', payload),
   sitesVisitsOpenTrack: (projectId) => ipcRenderer.invoke('sites-visits-open-track', projectId),
 
-  // Tasks (待辦事項)
-  getTasks: () => ipcRenderer.invoke('get-tasks'),
-  addTask: (payload) => ipcRenderer.invoke('add-task', payload),
-  updateTask: (taskId, fields) => ipcRenderer.invoke('update-task', taskId, fields),
+  // 記事（Sheets by spreadsheetId）
+  notesList: (payload) => ipcRenderer.invoke('notes-list', payload),
+  notesGet: (noteId) => ipcRenderer.invoke('notes-get', noteId),
+  notesCreate: (payload) => ipcRenderer.invoke('notes-create', payload),
+  notesUpdateTitle: (payload) => ipcRenderer.invoke('notes-update-title', payload),
+  notesSaveItems: (payload) => ipcRenderer.invoke('notes-save-items', payload),
+  notesSetPrefs: (payload) => ipcRenderer.invoke('notes-set-prefs', payload),
+  notesShare: (payload) => ipcRenderer.invoke('notes-share', payload),
+  notesRevoke: (payload) => ipcRenderer.invoke('notes-revoke', payload),
+  notesLeave: (payload) => ipcRenderer.invoke('notes-leave', payload),
+  notesTrash: (payload) => ipcRenderer.invoke('notes-trash', payload),
+  notesRestore: (payload) => ipcRenderer.invoke('notes-restore', payload),
+  notesPurge: (payload) => ipcRenderer.invoke('notes-purge', payload),
+  notesJoinSheet: (payload) => ipcRenderer.invoke('notes-join-sheet', payload),
+  notesReorderTabs: (payload) => ipcRenderer.invoke('notes-reorder-tabs', payload),
+  notesImportKeep: () => ipcRenderer.invoke('notes-import-keep'),
+  notesImportStatus: () => ipcRenderer.invoke('notes-import-status'),
 
   // Calendar (日曆)
   getCalendar: () => ipcRenderer.invoke('get-calendar'),
@@ -222,6 +239,33 @@ contextBridge.exposeInMainWorld('api', {
   reportSaveTable: (table) => ipcRenderer.invoke('report-save-table', table),
   reportPresets: () => ipcRenderer.invoke('report-presets'),
   reportRun: (payload) => ipcRenderer.invoke('report-run', payload),
+  reportExportList: () => ipcRenderer.invoke('report-export-list'),
+  reportExportGet: (id) => ipcRenderer.invoke('report-export-get', id),
+  reportExportCreate: (payload) => ipcRenderer.invoke('report-export-create', payload),
+  reportExportUpdate: (id, payload) => ipcRenderer.invoke('report-export-update', id, payload),
+  reportExportDelete: (id) => ipcRenderer.invoke('report-export-delete', id),
+  reportExportPreview: (payload) => ipcRenderer.invoke('report-export-preview', payload),
+  reportExportExecute: (payload) => ipcRenderer.invoke('report-export-execute', payload),
+  reportExportExecutions: (payload) => ipcRenderer.invoke('report-export-executions', payload),
+  reportExportPickLocalFolder: () => ipcRenderer.invoke('report-export-pick-local-folder'),
+  reportExportAuthStatus: () => ipcRenderer.invoke('report-export-auth-status'),
+  reportExportDriveResolveFolder: (payload) => ipcRenderer.invoke('report-export-drive-resolve-folder', payload),
+  reportExportDriveCreateFolder: (payload) => ipcRenderer.invoke('report-export-drive-create-folder', payload),
+  reportExportDriveListFolders: () => ipcRenderer.invoke('report-export-drive-list-folders'),
+  reportExportGetSqlConfig: () => ipcRenderer.invoke('report-export-get-sql-config'),
+  reportExportSaveSqlConfig: (payload) => ipcRenderer.invoke('report-export-save-sql-config', payload),
+  reportExportSetSqlProfile: (profile) => ipcRenderer.invoke('report-export-set-sql-profile', profile),
+  reportExportCatalogStatus: () => ipcRenderer.invoke('report-export-catalog-status'),
+  reportExportCreateCatalog: () => ipcRenderer.invoke('report-export-create-catalog'),
+  reportExportJoinCatalog: (payload) => ipcRenderer.invoke('report-export-join-catalog', payload),
+  reportExportShare: (payload) => ipcRenderer.invoke('report-export-share', payload),
+  reportExportRevoke: (payload) => ipcRenderer.invoke('report-export-revoke', payload),
+  reportExportLeaveCatalog: () => ipcRenderer.invoke('report-export-leave-catalog'),
+  onReportExportListChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('report-export-list-changed', listener);
+    return () => ipcRenderer.removeListener('report-export-list-changed', listener);
+  },
   onGmailPacket: (callback) => {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('gmail-packet', listener);

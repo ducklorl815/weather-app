@@ -7,4 +7,9 @@
   修改 DOM id 請同步 logic / main IPC。
   ============================================================================
 -->
-<div class="filter-chips" id="mail-chips"></div><div class="card-body" id="gmail-list"></div>
+<div class="mail-filter-bar" id="mail-filter-bar">
+  <div class="filter-chips" id="mail-chips"></div>
+  <button type="button" class="mail-filter-toggle" id="mail-filter-toggle" title="收合分類"
+    onclick="event.stopPropagation(); toggleMailFilterChips()" hidden>收合</button>
+</div>
+<div class="card-body" id="gmail-list"></div>

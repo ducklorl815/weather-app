@@ -482,6 +482,8 @@ function saveGchatPrefs(prefs) {
 }
 
 let win;
+/** [Important] report-export 模組控制項（Scheduler start/stop）；register 後賦值 */
+let reportExportControls = null;
 let sitesDeptOrgWin = null;
 let tray = null;
 let toastWin = null;
@@ -575,6 +577,8 @@ function clampQuickSearchBounds(x, y, width, height) {
 let gchatQuickSearchBlurTimer = null;
 
 function openGchatQuickSearchWindow() {
+  // [Important] ADR 0006：Little Reply Feature Off 時停用 Quick Search
+  if (!isFeatureActive('gchat')) return null;
   const pt = screen.getCursorScreenPoint();
   const width = 340;
   const height = 420;
@@ -717,13 +721,28 @@ function replyPopBarStackReserve() {
 }
 let isQuitting = false;
 let oauth2Client;
-let tasksService, calendarService, gmailService, peopleService, sheetsService, chatService, adminService, driveService;
+let calendarService, gmailService, peopleService, sheetsService, chatService, adminService, driveService, keepService;
 let syncTimer = null;
 let meetingTimer = null;
 const GMAIL_SYNC_MS = 60 * 1000;
 const promptedMeetings = new Set();
 let meetingPromptBusy = false;
 let sessionWatchTimer = null;
+
+/**
+ * [Important] ADR 0006 — Active Feature List
+ * Renderer mosaic 為準；未收到清單前不得啟動任何功能背景。
+ */
+let activeFeaturesReceived = false;
+const activeFeatureSet = new Set();
+
+function isFeatureActive(type) {
+  return activeFeaturesReceived && activeFeatureSet.has(String(type || '').trim());
+}
+
+function getActiveFeatureList() {
+  return [...activeFeatureSet];
+}
 
 /** Phase 1：授權 UI 狀態（與磁碟 credential 分離） */
 const AUTH_STATUS = {
@@ -784,7 +803,6 @@ const GOOGLE_BASE_SCOPES = [
 
 const FEATURE_SCOPE_MAP = {
   calendar: ['https://www.googleapis.com/auth/calendar'],
-  tasks: ['https://www.googleapis.com/auth/tasks'],
   gmail: [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/contacts.readonly',
@@ -793,18 +811,23 @@ const FEATURE_SCOPE_MAP = {
   // [Important] Scope Registry：gchat gate = Core；Extended 另列，Full Login 仍一次請求
   gchat: [...GCHAT_CORE_SCOPES],
   sheets: [SHEETS_SCOPE, DRIVE_FILE_SCOPE],
+  // 記事：Sheets by spreadsheetId（列表用本機索引；內容只打該 Sheet ID）
+  notes: [SHEETS_SCOPE, DRIVE_FILE_SCOPE],
   sitesVisits: [SHEETS_SCOPE],
-  chat: ['https://www.googleapis.com/auth/cloud-platform']
+  chat: ['https://www.googleapis.com/auth/cloud-platform'],
+  // SQL 報表匯出：Google Drive 輸出需要 drive.file（Local 不強制，但 Scope Registry 仍登錄）
+  reportExport: [SHEETS_SCOPE, DRIVE_FILE_SCOPE]
 };
 
 const FEATURE_LABELS = {
   calendar: '預定行程',
-  tasks: '待辦事項',
   gmail: '未讀郵件',
   gchat: 'Little Reply',
   sheets: '9527',
+  notes: '記事',
   sitesVisits: '網站瀏覽紀錄',
-  chat: '詢問機器人'
+  chat: '詢問機器人',
+  reportExport: 'SQL 清單列表'
 };
 
 /** [Important] 授權一律請求全部功能 scope，不再依工作台 widget 分批 */
@@ -831,13 +854,12 @@ function allApplicationScopes() {
 }
 
 /** 授權後同步順序：Little Reply → 郵件 → 行程 → 其餘 */
-const FEATURE_SYNC_PRIORITY = ['gchat', 'gmail', 'calendar', 'tasks', 'sheets', 'sitesVisits', 'chat'];
+const FEATURE_SYNC_PRIORITY = ['gchat', 'gmail', 'calendar', 'notes', 'sheets', 'sitesVisits', 'chat'];
 
 /** @deprecated 僅相容舊流程；登入勿再一次要全部 */
 const GOOGLE_SCOPES = [
   ...GOOGLE_BASE_SCOPES,
   ...FEATURE_SCOPE_MAP.calendar,
-  ...FEATURE_SCOPE_MAP.tasks,
   ...FEATURE_SCOPE_MAP.gmail,
   ...GCHAT_CORE_SCOPES,
   ...GCHAT_EXTENDED_SCOPES,
@@ -920,12 +942,16 @@ const gchatLocallyReadSpaces = new Map();
 
 function initGoogleServices() {
   const google = getGoogle();
-  tasksService = google.tasks({ version: 'v1', auth: oauth2Client });
   calendarService = google.calendar({ version: 'v3', auth: oauth2Client });
   gmailService = google.gmail({ version: 'v1', auth: oauth2Client });
   peopleService = google.people({ version: 'v1', auth: oauth2Client });
   sheetsService = google.sheets({ version: 'v4', auth: oauth2Client });
   driveService = google.drive({ version: 'v3', auth: oauth2Client });
+  try {
+    keepService = google.keep({ version: 'v1', auth: oauth2Client });
+  } catch (_) {
+    keepService = null;
+  }
   chatService = google.chat({ version: 'v1', auth: oauth2Client });
   adminService = null; // 一般員工改用 People directory.readonly，不再打 Admin SDK
 }
@@ -1035,6 +1061,24 @@ function shutdownLittleReplyForLogout() {
   replyPopMessageName = '';
 }
 
+/**
+ * Little Reply Feature Off（ADR 0006）：關衛星窗＋停背景，保留 Session／Credential／磁碟 cache。
+ * 與 logout 不同：不清 Credential、不 unlink packet 檔。
+ */
+function featureOffLittleReply() {
+  shutdownLittleReplyForLogout();
+  if (gchatPollCoordinator) {
+    try { gchatPollCoordinator.clearInterests(); } catch (_) {}
+  }
+  mainGchatAlertSeeded = false;
+  mainGchatAlerted.clear();
+  mainGchatAlertedAt.clear();
+  pinnedGroupAlertCursors.clear();
+  try {
+    if (toastWin && !toastWin.isDestroyed()) toastWin.hide();
+  } catch (_) {}
+}
+
 function packetSnapshot(labelId) {
   let emails = cache.emails.filter(e => e.isUnread !== false && (e.labelIds || []).includes('UNREAD'));
   if (labelId) {
@@ -1060,12 +1104,13 @@ function notifyRenderer() {
 }
 
 function startSyncLoop() {
+  // [Important] ADR 0006：Gmail 背景僅在 Active Feature 時啟動；會議提醒改綁 Calendar
+  if (!isFeatureActive('gmail')) return;
   loadDiskPacket();
   notifyRenderer();
   if (syncTimer) clearInterval(syncTimer);
   runSync();
   syncTimer = setInterval(runSync, GMAIL_SYNC_MS);
-  startMeetingWatch();
 }
 
 function stopSyncLoop() {
@@ -1073,7 +1118,6 @@ function stopSyncLoop() {
     clearInterval(syncTimer);
     syncTimer = null;
   }
-  stopMeetingWatch();
 }
 
 function extractMeetingUrl(event) {
@@ -1091,6 +1135,8 @@ function extractMeetingUrl(event) {
 }
 
 function startMeetingWatch() {
+  // [Important] ADR 0006：會議提醒綁 Calendar Active，不掛在 Gmail sync loop
+  if (!isFeatureActive('calendar')) return;
   if (meetingTimer) clearInterval(meetingTimer);
   checkMeetingReminders();
   meetingTimer = setInterval(checkMeetingReminders, 30000);
@@ -1101,6 +1147,84 @@ function stopMeetingWatch() {
     clearInterval(meetingTimer);
     meetingTimer = null;
   }
+}
+
+async function tryStartGmailBackground() {
+  if (!isFeatureActive('gmail') || !oauth2Client) return;
+  try {
+    const scope = await grantedScopeText();
+    if (!scopeListHas(scope, FEATURE_SCOPE_MAP.gmail)) return;
+  } catch (_) {
+    return;
+  }
+  if (!syncTimer) startSyncLoop();
+}
+
+async function tryStartLittleReplyBackground() {
+  if (!isFeatureActive('gchat') || !oauth2Client || !chatService) return;
+  try {
+    const scope = await grantedScopeText();
+    if (!hasChatScopes(scope)) return;
+  } catch (_) {
+    return;
+  }
+  // [Important] ADR 0006：僅 Active Feature 才預載／開 scheduler（勿綁 Session）
+  bootstrapGchatAuthCache({ force: false }).catch((err) => {
+    console.warn('[GChat] Active Feature 預載通訊錄／表情失敗:', err?.message || err);
+  });
+  startGchatSyncScheduler();
+}
+
+/** 依 Active Feature List 對齊背景（未收到清單則 no-op） */
+async function reconcileActiveFeatureBackgrounds() {
+  if (!activeFeaturesReceived) return;
+  if (isFeatureActive('gmail')) await tryStartGmailBackground();
+  else stopSyncLoop();
+  if (isFeatureActive('calendar')) startMeetingWatch();
+  else stopMeetingWatch();
+  if (isFeatureActive('gchat')) await tryStartLittleReplyBackground();
+  else featureOffLittleReply();
+  // SQL 報表匯出：App 內 Scheduler（Phase 3）
+  if (isFeatureActive('reportExport')) {
+    try { reportExportControls?.startScheduler?.(); } catch (_) {}
+  } else {
+    try { reportExportControls?.stopScheduler?.(); } catch (_) {}
+  }
+}
+
+/**
+ * Renderer 推送 Active Feature List（mosaic 為準）。
+ * @param {string[]} types
+ */
+function setActiveFeatureList(types) {
+  const next = new Set(
+    (Array.isArray(types) ? types : [])
+      .map((t) => String(t || '').trim())
+      .filter(Boolean)
+  );
+  const prevHadGchat = activeFeatureSet.has('gchat');
+  activeFeaturesReceived = true;
+  activeFeatureSet.clear();
+  for (const t of next) activeFeatureSet.add(t);
+
+  if (prevHadGchat && !next.has('gchat')) {
+    featureOffLittleReply();
+  } else if (!next.has('gchat')) {
+    stopGchatSyncScheduler();
+    try {
+      if (toastWin && !toastWin.isDestroyed()) toastWin.hide();
+    } catch (_) {}
+  }
+  if (!next.has('gmail')) stopSyncLoop();
+  if (!next.has('calendar')) stopMeetingWatch();
+  if (!next.has('reportExport')) {
+    try { reportExportControls?.stopScheduler?.(); } catch (_) {}
+  }
+
+  reconcileActiveFeatureBackgrounds().catch((err) => {
+    console.warn('[ActiveFeatures] reconcile failed:', err?.message || err);
+  });
+  return { success: true, features: getActiveFeatureList(), received: true };
 }
 
 async function checkMeetingReminders() {
@@ -2327,6 +2451,10 @@ function positionReplyPopWindow() {
 }
 
 async function openCompactGchatReply(messageName, opts = {}) {
+  // [Important] ADR 0006：Little Reply Feature Off 時不開 Reply Pop
+  if (!isFeatureActive('gchat')) {
+    return { success: false, error: 'Little Reply 未加入工作台', inactive: true };
+  }
   if (!messageName && !opts.spaceName && !opts.userName) return { success: false };
   if (!messageName && opts.spaceName) {
     const spacePack = findReadyGchatPacketBySpace(opts.spaceName, { isDm: !!opts.isDm });
@@ -3137,6 +3265,7 @@ async function bumpReplyPopUnread(entry, message, titleHint = '') {
 }
 
 async function showFloatingGchatToast(message) {
+  if (!isFeatureActive('gchat')) return { success: false, inactive: true };
   const prefs = loadGchatPrefs();
   if (prefs.alertPopup === false) return { success: false, skipped: true };
   if (!message?.name) return { success: false };
@@ -3277,7 +3406,7 @@ async function showFloatingGchatToast(message) {
 // ========== 【MODULE: framework/partial-views】Renderer Partial 讀取 ==========
 // [Important] 「加入功能」時 renderer 會請求此 IPC，讀取 features/<type>/view.html
 const FEATURE_PARTIAL_ALLOW = new Set([
-  'calendar', 'tasks', 'gmail', 'gchat', 'sheets', 'sitesVisits', 'chat'
+  'calendar', 'gmail', 'gchat', 'sheets', 'notes', 'sitesVisits', 'chat', 'reportExport'
 ]);
 
 ipcMain.handle('load-feature-partial', async (_event, type) => {
@@ -3836,7 +3965,7 @@ function startViewingRefreshWatch() {
   coord.registerInterest(gchatViewingInterestKey, { detail, source: 'viewing' });
 }
 
-/** 停止 Background Sync Scheduler（僅登出／關閉 Little Reply 時呼叫） */
+/** 停止 Background Sync Scheduler（僅登出／Little Reply Feature Off 時呼叫） */
 function stopGchatSyncScheduler() {
   if (gchatSyncStack?.scheduler) {
     gchatSyncStack.scheduler.stop();
@@ -4172,7 +4301,7 @@ function isOwnChatApiRawMessage(msg) {
  * 不依賴「未讀／@我」列表，群組討論串回覆也能更新。
  */
 async function syncRegistryReplyPopBadges() {
-  if (!oauth2Client || !chatService) return;
+  if (!isFeatureActive('gchat') || !oauth2Client || !chatService) return;
   const entries = [...replyPopRegistry.values()].filter(e => e?.spaceName);
   if (!entries.length) return;
 
@@ -4408,6 +4537,7 @@ function broadcastGchatListUpdate() {
 }
 
 async function notifyNewGchatAlerts() {
+  if (!isFeatureActive('gchat')) return;
   if (loadGchatPrefs().alertPopup === false) return;
   const inboxAlerts = (gchatSnapshot().messages || []).filter((m) => isInboxGchatMessage(m) && (m.isDm || m.mentionedMe));
   if (!mainGchatAlertSeeded) {
@@ -4603,9 +4733,10 @@ async function collectPinnedGroupAlertMessages() {
 
 /**
  * 啟動 Background Sync Scheduler（冪等：已運行則不重啟）
- * [Important] 生命週期綁 Session／gchat 授權，不綁 Toast 設定
+ * [Important] ADR 0006：生命週期綁 Active Feature（gchat），不綁 Toast 設定、不綁 Session  alone
  */
 function startGchatSyncScheduler() {
+  if (!isFeatureActive('gchat')) return;
   ensureGchatSyncStack().scheduler.start();
 }
 
@@ -4700,11 +4831,28 @@ ipcMain.handle('set-open-at-login', async (event, enabled) => {
   }
 });
 
+// [Important] ADR 0006：Active Feature List（Renderer mosaic → Main）
+ipcMain.handle('set-active-features', async (_event, types) => {
+  try {
+    return setActiveFeatureList(types);
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('get-active-features', async () => ({
+  success: true,
+  received: activeFeaturesReceived,
+  features: getActiveFeatureList()
+}));
+
 // 💡 新增：清除 Token 並重新啟動 APP
 ipcMain.on('logout', () => {
   isQuitting = true;
   stopSyncLoop();
+  stopMeetingWatch();
   stopSessionWatch();
+  try { reportExportControls?.stopScheduler?.(); } catch (_) {}
   shutdownLittleReplyForLogout();
   clearPacket();
   clearOAuthClientMemory();
@@ -4829,13 +4977,14 @@ function isGoogle401Error(err) {
 /** 僅清記憶體中的 OAuth client／服務；不刪除 google_token.json */
 function clearOAuthClientMemory() {
   stopSyncLoop();
+  stopMeetingWatch();
   oauth2Client = null;
-  tasksService = null;
   calendarService = null;
   gmailService = null;
   peopleService = null;
   sheetsService = null;
   driveService = null;
+  keepService = null;
   chatService = null;
   adminService = null;
 }
@@ -4927,28 +5076,13 @@ async function ensureGoogleSession({ silent = false } = {}) {
     persistOAuthTokens(oauth2Client.credentials || tokens);
 
     if (!gmailService) initGoogleServices();
-    // 有 Gmail 權限才跑郵件同步；沒有也不影響已登入
-    try {
-      const scope = await grantedScopeText();
-      if (scopeListHas(scope, FEATURE_SCOPE_MAP.gmail) && !syncTimer) startSyncLoop();
-    } catch (_) {
-      if (!syncTimer) startSyncLoop();
-    }
+    // [Important] ADR 0006：背景啟動改由 Active Feature List reconcile，不在 Session 成功時無條件開
+    reconcileActiveFeatureBackgrounds().catch((err) => {
+      console.warn('[ActiveFeatures] session reconcile failed:', err?.message || err);
+    });
 
     setSessionAuthStatus(AUTH_STATUS.AUTHENTICATED);
-    try {
-      const scope = await grantedScopeText();
-      if (hasChatScopes(scope)) {
-        setTimeout(() => {
-          bootstrapGchatAuthCache({ force: false }).catch((err) => {
-            console.warn('[GChat] 登入預載通訊錄／表情失敗:', err.message);
-          });
-          prefetchGchatTodayCache().catch((err) => {
-            console.warn('[GChat] 登入預載今日暫存失敗:', err.message);
-          });
-        }, 0);
-      }
-    } catch (_) {}
+    // [Important] ADR 0006：有 Chat scope ≠ 可打 Chat API；預載改由 tryStartLittleReplyBackground
     return { success: true, restored: wasDown, authStatus: AUTH_STATUS.AUTHENTICATED };
   } catch (err) {
     const errMsg = err.message || String(err);
@@ -5388,8 +5522,8 @@ function runGoogleOAuthFlow(scopes, {
         if (!merged.refresh_token && tokens.refresh_token) merged.refresh_token = tokens.refresh_token;
         merged = await finalizeOAuthCredentials(client, merged);
         try {
-          const sc = merged.scope || tokens.scope || '';
-          if (scopeListHas(sc, FEATURE_SCOPE_MAP.gmail)) startSyncLoop();
+          // [Important] ADR 0006：OAuth 成功不直接開背景；等 Active Feature List
+          reconcileActiveFeatureBackgrounds().catch(() => {});
         } catch (_) {}
         sessionState.authed = true;
         sessionState.offline = false;
@@ -5547,6 +5681,8 @@ async function syncAuthorizedFeatures(types) {
     ...types.filter((t) => !FEATURE_SYNC_PRIORITY.includes(t))
   ];
   for (const type of ordered) {
+    // [Important] ADR 0006：未 Active 的功能不跑背景／tick
+    if (!isFeatureActive(type)) continue;
     if (!isFeatureAuthorized(type, scope)) continue;
     try {
       if (type === 'gchat') {
@@ -5560,6 +5696,11 @@ async function syncAuthorizedFeatures(types) {
         if (!scopeListHas(scope, FEATURE_SCOPE_MAP.gmail)) continue;
         if (!syncTimer) startSyncLoop();
         else await runSync();
+      } else if (type === 'calendar') {
+        startMeetingWatch();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('feature-sync-tick', type);
+        }
       } else if (win && !win.isDestroyed()) {
         win.webContents.send('feature-sync-tick', type);
       }
@@ -5568,7 +5709,7 @@ async function syncAuthorizedFeatures(types) {
     }
   }
   if (win && !win.isDestroyed()) {
-    win.webContents.send('features-synced', { types: ordered });
+    win.webContents.send('features-synced', { types: ordered.filter((t) => isFeatureActive(t)) });
   }
 }
 
@@ -5740,7 +5881,8 @@ ipcMain.handle('auth-google-chat', async () => {
   try {
     const result = await runFeatureOAuth('gchat');
     if (!result.success) return result;
-    startGchatSyncScheduler();
+    // ADR 0006：由 Active Feature／syncAuthorizedFeatures 決定是否開 scheduler
+    await reconcileActiveFeatureBackgrounds();
     return { success: true };
   } catch (err) { return { success: false, error: err.message }; }
 });
@@ -6306,10 +6448,10 @@ const BUG_REPORT_MAX_IMAGES = 3;
 /** 對應「加入功能」目錄；實際選項只含 dist-features 有開放的 */
 const BUG_REPORT_FEATURE_CATALOG = [
   { type: 'calendar', label: '預定行程' },
-  { type: 'tasks', label: '待辦事項' },
   { type: 'gmail', label: '未讀郵件' },
   { type: 'gchat', label: 'Little Reply' },
   { type: 'sheets', label: '9527' },
+  { type: 'notes', label: '記事' },
   { type: 'sitesVisits', label: '網站瀏覽紀錄' },
   { type: 'chat', label: '詢問機器人' }
 ];
@@ -6748,7 +6890,7 @@ ipcMain.handle('sheets-list-sources', async () => {
 });
 
 // [Manual] dist 功能開關：專案根目錄 dist-features.json；打勾的才會在正式包出現
-const DIST_WIDGET_KEYS = ['calendar', 'tasks', 'gmail', 'gchat', 'sheets', 'sitesVisits', 'chat'];
+const DIST_WIDGET_KEYS = ['calendar', 'gmail', 'gchat', 'sheets', 'notes', 'sitesVisits', 'chat', 'reportExport'];
 
 function distFeaturesPath() {
   return path.join(APP_ROOT, 'dist-features.json');
@@ -8837,111 +8979,26 @@ ipcMain.handle('sites-visits-dept-org-export', async (event, payload) => {
 });
 
 
-// ========== 【MODULE: modules/tasks】Tasks ==========
-// Tasks APIs
-function normalizeTaskItem(t) {
-  return {
-    id: t.id,
-    title: t.title || '',
-    notes: t.notes || '',
-    status: t.status || 'needsAction',
-    parent: t.parent || '',
-    position: t.position || '',
-    updated: t.updated || '',
-    due: t.due || '',
-    completed: t.completed || '',
-    hidden: !!t.hidden,
-    deleted: !!t.deleted
-  };
+// ========== 【MODULE: modules/notes】記事 ==========
+try {
+  const { registerNotesModule } = require('./modules/notes/register');
+  registerNotesModule({
+    ipcMain,
+    app,
+    path,
+    fs,
+    getSheetsService: () => sheetsService,
+    getDriveService: () => driveService,
+    withGoogleApiRetry,
+    grantedScopeText,
+    hasSheetsScope,
+    hasDriveFileScope,
+    quoteSheetRange,
+    resolveMyEmail: ensureMyEmailForBugReport
+  });
+} catch (err) {
+  console.error('[notes] register failed', err);
 }
-
-function buildTaskTree(items) {
-  const map = {};
-  for (const raw of items || []) {
-    if (!raw?.id) continue;
-    map[raw.id] = { ...normalizeTaskItem(raw), children: [] };
-  }
-  const roots = [];
-  for (const t of Object.values(map)) {
-    if (t.parent && map[t.parent]) map[t.parent].children.push(t);
-    else roots.push(t);
-  }
-  const byPos = (a, b) => String(a.position || '').localeCompare(String(b.position || ''));
-  const byNewest = (a, b) => new Date(b.updated || 0) - new Date(a.updated || 0);
-  for (const t of Object.values(map)) t.children.sort(byPos);
-  const incomplete = roots.filter(t => t.status !== 'completed').sort(byNewest);
-  const complete = roots.filter(t => t.status === 'completed').sort(byNewest).slice(0, 30);
-  return [...incomplete, ...complete];
-}
-
-ipcMain.handle('get-tasks', async () => {
-  try {
-    const res = await withGoogleApiRetry(() => tasksService.tasks.list({
-      tasklist: '@default',
-      showCompleted: true,
-      showHidden: true,
-      maxResults: 100
-    }));
-    const flat = (res.data.items || [])
-      .filter(t => t.deleted !== true && (t.status === 'completed' || t.hidden !== true))
-      .map(normalizeTaskItem);
-    const tasks = buildTaskTree(flat);
-    const byId = {};
-    const walk = (list) => {
-      for (const t of list || []) {
-        byId[t.id] = t;
-        walk(t.children);
-      }
-    };
-    walk(tasks);
-    return { success: true, tasks, byId, flat };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('add-task', async (event, payload) => {
-  try {
-    const title = typeof payload === 'string' ? payload : payload?.title;
-    const notes = typeof payload === 'object' && payload ? String(payload.notes || '') : '';
-    const parent = typeof payload === 'object' && payload ? String(payload.parent || '') : '';
-    const trimmed = String(title || '').trim();
-    if (!trimmed) return { success: false, error: '標題不能空白' };
-    const requestBody = { title: trimmed };
-    if (notes) requestBody.notes = notes;
-    const params = { tasklist: '@default', requestBody };
-    // [Important] 子工作用 parent 查詢參數掛到父任務下
-    if (parent) params.parent = parent;
-    await withGoogleApiRetry(() => tasksService.tasks.insert(params));
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-// [Important] 用 patch 局部更新，避免只改 notes／狀態時把 title 清掉
-ipcMain.handle('update-task', async (event, taskId, fields = {}, legacyStatus) => {
-  try {
-    if (!taskId) return { success: false, error: '缺少任務 ID' };
-    let body = fields;
-    if (typeof fields === 'string') {
-      body = { title: fields };
-      if (legacyStatus !== undefined) body.status = legacyStatus;
-    }
-    const requestBody = { id: taskId };
-    if (body.title !== undefined) requestBody.title = String(body.title);
-    if (body.notes !== undefined) requestBody.notes = String(body.notes ?? '');
-    if (body.status !== undefined) requestBody.status = body.status;
-    await withGoogleApiRetry(() => tasksService.tasks.patch({
-      tasklist: '@default',
-      task: taskId,
-      requestBody
-    }));
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
 
 const GMAIL_LABEL_NAMES = {
   CATEGORY_PERSONAL: '主要',
@@ -12082,6 +12139,8 @@ async function markChatMessageReadRemote(messageName, meta = {}) {
 
 async function bootstrapGchatAuthCache({ force = false } = {}) {
   if (!oauth2Client || !chatService) return { skipped: true };
+  // [Important] ADR 0006：通訊錄／表情預載也綁 Active Feature
+  if (!isFeatureActive('gchat')) return { skipped: true, reason: 'feature_inactive' };
   const scope = await grantedScopeText();
   if (!hasChatScopes(scope)) return { skipped: true };
   if (isChatApiQuotaBlocked()) return { skipped: true, quotaBlocked: true };
@@ -12126,12 +12185,14 @@ async function bootstrapGchatAuthCache({ force = false } = {}) {
   return { success: true, directoryStale, emojiStale };
 }
 
-/** 啟動後背景預載通訊錄（優先用磁碟快取，僅在超過 TTL 時打 API） */
+/** 啟動後背景預載通訊錄（僅 Little Reply 為 Active Feature 時；優先磁碟快取） */
 function scheduleGchatDirectoryWarmOnStartup() {
   setTimeout(async () => {
     try {
       const session = await ensureGoogleSession({ silent: true });
       if (!session?.success) return;
+      // [Important] ADR 0006：未加入工作台不打 Chat API（清單未到則略過，等 reconcile）
+      if (!isFeatureActive('gchat')) return;
       const scope = await grantedScopeText();
       if (!hasChatScopes(scope)) return;
       if (!oauth2Client || !chatService) initGoogleServices();
@@ -12187,6 +12248,11 @@ async function finalizeGchatInboxSync() {
 }
 
 async function prefetchGchatTodayCache({ notify = true } = {}) {
+  // [Important] ADR 0006：未 Active 不拉 inbox／不打包歷史（避免 messages.list 背景打量）
+  if (!isFeatureActive('gchat')) {
+    gchatSyncLog('[SYNC] prefetch skipped (gchat not active)');
+    return { skipped: true, reason: 'feature_inactive' };
+  }
   const repo = getGchatCacheRepository();
   const syncSvc = gchatSyncStack?.syncService;
   let stats;
@@ -12277,6 +12343,10 @@ async function refreshGchatList() {
 
 /** Sync 層：從 Server 拉討論串並寫入 PacketRepository */
 async function syncGchatThreadFromServer(detail, { notifyUi = false } = {}) {
+  if (!isFeatureActive('gchat')) {
+    gchatSyncLog('[SYNC] thread skipped (gchat not active)');
+    return null;
+  }
   await ensureMyChatUserName(detail.spaceName);
   const thread = await loadConversationHistory({
     spaceName: detail.spaceName,
@@ -12368,7 +12438,8 @@ function ensureGchatSyncStack() {
   });
   const packetRepository = ensureGchatPacketRepository();
   const syncService = createSyncService({
-    isReady: () => !!(oauth2Client && chatService),
+    // [Important] ADR 0006：SyncService 與 Scheduler 同樣閘 Active Feature
+    isReady: () => !!(oauth2Client && chatService && isFeatureActive('gchat')),
     readSync,
     cacheRepository,
     setSyncing: (v) => { gchatCache.syncing = !!v; },
@@ -12384,7 +12455,7 @@ function ensureGchatSyncStack() {
   const scheduler = createSyncScheduler({
     syncService,
     pollCoordinator,
-    isReady: () => !!(oauth2Client && chatService),
+    isReady: () => !!(oauth2Client && chatService && isFeatureActive('gchat')),
     intervalMs: GCHAT_ALERT_POLL_MS
   });
   gchatSyncStack = { scheduler, syncService, cacheRepository, readSync, chatApiService, packetRepository, pollCoordinator };
@@ -12654,7 +12725,7 @@ async function packGchatSpaceHistory(spaceName, extras = {}) {
 
 /** 置頂私人／群組預打包，點芯片才能走暫存 */
 async function packPinnedGchatConversations() {
-  if (!chatService || !oauth2Client) return;
+  if (!isFeatureActive('gchat') || !chatService || !oauth2Client) return;
   const prefs = loadGchatPrefs();
   const jobs = [];
 
@@ -12868,7 +12939,8 @@ function createGchatIpcDeps() {
         mainGchatAlertedAt.clear();
         pinnedGroupAlertCursors.clear();
       }
-      startGchatSyncScheduler();
+      // ADR 0006：僅 Active 時 start；Toast 偏好變更不強制開背景
+      if (isFeatureActive('gchat')) startGchatSyncScheduler();
     },
     inbox: {
       isChatReady: () => !!(oauth2Client && chatService),
@@ -12881,6 +12953,9 @@ function createGchatIpcDeps() {
       explainError: explainChatError,
       setupUrl: chatApiEnableUrl,
       syncInbox: async () => {
+        if (!isFeatureActive('gchat')) {
+          return { skipped: true, inactive: true };
+        }
         await ensureGchatSyncStack().syncService.syncUnreadInbox();
         await notifyNewGchatAlerts();
       },
@@ -13111,6 +13186,13 @@ function createGchatIpcDeps() {
         return { success: true, viewing: gchatViewing };
       },
       alertWatch: (enabled) => {
+        if (!isFeatureActive('gchat')) {
+          try {
+            if (toastWin && !toastWin.isDestroyed()) toastWin.hide();
+          } catch (_) {}
+          stopGchatSyncScheduler();
+          return { success: true, enabled: false, inactive: true };
+        }
         if (enabled) {
           mainGchatAlertSeeded = false;
           mainGchatAlerted.clear();
@@ -13349,7 +13431,7 @@ function loadGeminiConfig() {
 
 function saveGeminiConfig(cfg) {
   const current = loadGeminiConfig();
-  fs.writeFileSync(geminiConfigPath(), JSON.stringify({
+  const next = {
     apiKey: cfg.apiKey === undefined ? (current.apiKey || '') : cfg.apiKey,
     model: cfg.model || current.model || 'gemini-2.5-flash',
     projectId: cfg.projectId === undefined ? (current.projectId || '') : String(cfg.projectId || '').trim(),
@@ -13365,8 +13447,15 @@ function saveGeminiConfig(cfg) {
     sqlUser: cfg.sqlUser === undefined ? (current.sqlUser || '') : String(cfg.sqlUser || '').trim(),
     sqlPassword: cfg.sqlPassword === undefined || cfg.sqlPassword === '' ? (current.sqlPassword || '') : cfg.sqlPassword,
     sqlEncrypt: cfg.sqlEncrypt === undefined ? !!current.sqlEncrypt : !!cfg.sqlEncrypt,
-    sqlTrustCert: cfg.sqlTrustCert === undefined ? current.sqlTrustCert !== false : !!cfg.sqlTrustCert
-  }));
+    sqlTrustCert: cfg.sqlTrustCert === undefined ? current.sqlTrustCert !== false : !!cfg.sqlTrustCert,
+    // [Important] 報表匯出：測試／正式雙連線（開發者設定）
+    sqlProfiles: cfg.sqlProfiles === undefined ? (current.sqlProfiles || undefined) : cfg.sqlProfiles,
+    reportSqlActiveProfile: cfg.reportSqlActiveProfile === undefined
+      ? (current.reportSqlActiveProfile || 'test')
+      : (cfg.reportSqlActiveProfile === 'production' ? 'production' : 'test')
+  };
+  if (!next.sqlProfiles) delete next.sqlProfiles;
+  fs.writeFileSync(geminiConfigPath(), JSON.stringify(next));
 }
 
 function loadKnowledgeIndex() {
@@ -13581,6 +13670,25 @@ function looksLikeConnectionString(value) {
 function normalizeConnectionString(raw) {
   let text = String(raw || '').trim();
   if (!text) return '';
+
+  // .NET / ADO.NET 常見鍵名 → node-mssql（tedious）較能辨識的鍵名
+  text = text
+    .replace(/Data\s*Source\s*=/gi, 'Server=')
+    .replace(/Initial\s*Catalog\s*=/gi, 'Database=')
+    .replace(/User\s*ID\s*=/gi, 'User Id=')
+    .replace(/UID\s*=/gi, 'User Id=')
+    .replace(/PWD\s*=/gi, 'Password=');
+
+  // Server=tcp:HOST → Server=HOST
+  text = text.replace(/(Server\s*=\s*)tcp:/gi, '$1');
+
+  // 移除對 tedious 無用／易誤判的鍵
+  text = text
+    .replace(/Integrated\s*Security\s*=\s*[^;]*/gi, '')
+    .replace(/Pooling\s*=\s*[^;]*/gi, '')
+    .replace(/;;+/g, ';')
+    .replace(/^;|;$/g, '');
+
   if (!/Encrypt\s*=/i.test(text)) text += (text.endsWith(';') ? '' : ';') + 'Encrypt=false';
   if (!/TrustServerCertificate\s*=/i.test(text)) text += ';TrustServerCertificate=true';
   return text;
@@ -14371,6 +14479,31 @@ ipcMain.handle('report-run', async (event, { question, presetId }) => {
   }
 });
 
+// ========== 【MODULE: modules/report-export】SQL 報表匯出 ==========
+try {
+  const { registerReportExportModule } = require('./modules/report-export/register');
+  reportExportControls = registerReportExportModule({
+    ipcMain,
+    app,
+    dialog,
+    getMainWindow: () => win,
+    getSqlPool: (cfg) => getSqlPool(cfg || loadGeminiConfig()),
+    loadGeminiConfig,
+    saveGeminiConfig,
+    isFeatureActive,
+    getSheetsService: () => sheetsService,
+    getDriveService: () => driveService,
+    withGoogleApiRetry,
+    grantedScopeText,
+    hasSheetsScope,
+    hasDriveFileScope,
+    quoteSheetRange,
+    resolveMyEmail: ensureMyEmailForBugReport
+  });
+} catch (err) {
+  console.error('[report-export] register failed', err);
+}
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -14409,7 +14542,8 @@ if (!gotTheLock) {
     createWindow();
     startSessionWatch();
     scheduleGchatDirectoryWarmOnStartup();
-    // 登入後若已開提醒，背景輪詢會在 renderer 呼叫 gchat-alert-watch 啟動
+    // [Important] ADR 0006：背景輪詢僅在 Active Feature（gchat）時由 renderer 推清單後啟動
+    // showWorkspace → setActiveFeatures →（若有 gchat）gchat-alert-watch
     setupAutoUpdater();
   });
 }

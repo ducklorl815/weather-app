@@ -83,6 +83,32 @@
                     </div>
                     <div id="dev-settings-panels">
                     <div class="settings-section">
+                        <div class="settings-title">SQL 報表連線（開發者）</div>
+                        <p class="settings-hint">僅 npm start 可見。預覽／測試產生固定用「測試」連線；立即丟檔／排程固定用「正式」連線（安裝包則一律測試）。請分別儲存兩套連線字串。</p>
+                        <div class="re-settings-tabs" style="display:flex;gap:6px;margin:6px 0;">
+                            <button type="button" class="btn-ghost" id="re-set-tab-test" style="flex:1;" onclick="reSettingsSelectProfile('test')">測試</button>
+                            <button type="button" class="btn-ghost" id="re-set-tab-prod" style="flex:1;" onclick="reSettingsSelectProfile('production')">正式</button>
+                        </div>
+                        <p class="settings-hint" id="re-set-active-hint" style="margin-top:0;"></p>
+                        <label>連線字串（建議）</label>
+                        <textarea id="re-set-sql-conn" rows="3" placeholder="Server=...;Database=trdata;User Id=...;Password=...;Encrypt=false;TrustServerCertificate=true;"></textarea>
+                        <label>SQL Server（無連線字串時）</label>
+                        <input type="text" id="re-set-sql-server" placeholder="HOST 或 HOST\INSTANCE">
+                        <label>連接埠</label>
+                        <input type="text" id="re-set-sql-port" placeholder="1433">
+                        <label>資料庫</label>
+                        <input type="text" id="re-set-sql-database" placeholder="trdata">
+                        <label>帳號</label>
+                        <input type="text" id="re-set-sql-user" placeholder="登入帳號">
+                        <label>密碼</label>
+                        <input type="password" id="re-set-sql-password" placeholder="已儲存則可留空">
+                        <div style="display:flex;gap:6px;margin-top:8px;">
+                            <button type="button" class="btn-primary" style="flex:1;" onclick="reSettingsSaveProfile()">儲存此連線</button>
+                            <button type="button" class="btn-ghost" style="flex:1;" onclick="reSettingsUseProfile()">設為執行用</button>
+                        </div>
+                        <p class="settings-hint" id="re-set-sql-status"></p>
+                    </div>
+                    <div class="settings-section">
                         <div class="settings-title">Little Reply（開發者）</div>
                         <p class="settings-hint">先啟用 Google Chat API。加入「Little Reply」後再在小工具內按「授權使用」即可，不必登入時一次授權全部功能。</p>
                         <button class="btn-primary" style="width:100%;" onclick="openGchatApiSetup()">開啟並啟用 Google Chat API</button>
@@ -214,7 +240,6 @@
     <script src="renderer/components/gchat-lightbox-zoom.js"></script>
     <script src="renderer/components/gchat-pdf-viewer.js"></script>
     <script src="renderer/features/calendar/logic.js"></script>
-    <script src="renderer/features/tasks/logic.js"></script>
     <script src="renderer/features/gmail/logic.js"></script>
     <script src="renderer/features/gchat/logic.js"></script>
     <script src="renderer/features/sheets/logic.js"></script>

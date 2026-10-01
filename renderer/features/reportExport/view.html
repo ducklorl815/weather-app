@@ -1,0 +1,187 @@
+<!--
+  ============================================================================
+  Partial View: SQL 清單列表 (reportExport)
+  ----------------------------------------------------------------------------
+  [Important] 輸出設定僅開發者模式可見；SQL 連線在 App 設定→開發者區。
+  ============================================================================
+-->
+<div class="re-root" id="re-root">
+  <div class="re-list-view" id="re-list-view">
+    <div class="re-toolbar">
+      <div class="re-title">SQL 清單列表</div>
+      <div class="re-toolbar-actions">
+        <button type="button" class="btn-ghost" id="re-catalog-menu-btn" onclick="reToggleCatalogMenu(event)" title="共用報表庫">⋯</button>
+        <button type="button" class="btn-primary" onclick="reShowCreate()">新增報表</button>
+      </div>
+    </div>
+    <div class="re-catalog-pop" id="re-catalog-pop" hidden onclick="event.stopPropagation()">
+      <button type="button" class="re-catalog-item" id="re-catalog-sync-btn" onclick="reSyncCatalogToCloud()">建立／同步到雲端</button>
+      <button type="button" class="re-catalog-item" onclick="reJoinCatalog()">加入共享報表庫</button>
+      <button type="button" class="re-catalog-item" id="re-catalog-share-btn" onclick="reShareCatalogPrompt()" hidden>邀請協作者（email）</button>
+      <button type="button" class="re-catalog-item" id="re-catalog-copy-btn" onclick="reCopyCatalogSheetId()" hidden>複製 Sheet ID</button>
+      <button type="button" class="re-catalog-item" id="re-catalog-leave-btn" onclick="reLeaveCatalog()" hidden>離開共享報表庫</button>
+    </div>
+    <div class="re-hint" id="re-catalog-hint">依 SQL 產生 CSV，輸出到本機或 Google Drive。報表定義會存到「我的雲端硬碟／LifeTourTools／SQL報表」（僅受邀者可加入共用）。</div>
+    <div class="re-catalog-bar" id="re-catalog-bar" hidden>
+      <span class="re-catalog-label" id="re-catalog-label"></span>
+      <span class="re-catalog-collabs" id="re-catalog-collabs"></span>
+    </div>
+    <div class="re-table-wrap" id="re-list-table">
+      <div class="loading">載入中…</div>
+    </div>
+  </div>
+
+  <div class="re-detail-view" id="re-detail-view" hidden>
+    <div class="re-toolbar">
+      <button type="button" class="btn-ghost" onclick="reShowList()">← 返回列表</button>
+      <div class="re-toolbar-actions">
+        <button type="button" class="btn-ghost" id="re-btn-preview" onclick="rePreview()" title="使用測試 SQL 連線">預覽</button>
+        <button type="button" class="btn-ghost" id="re-btn-test" onclick="reExecute('Test')" title="測試 SQL 連線＋測試資料夾">測試產生</button>
+        <button type="button" class="btn-primary" id="re-btn-run" onclick="reExecute('Manual')" hidden title="正式 SQL 連線＋正式資料夾（僅開發者）">立即丟檔</button>
+        <button type="button" class="btn-primary" onclick="reSave()">儲存</button>
+      </div>
+    </div>
+
+    <input type="hidden" id="re-id" value="">
+
+    <div class="re-detail-layout">
+      <div class="re-detail-main">
+        <section class="re-section">
+          <h3>基本資料</h3>
+          <div class="re-form-grid">
+            <div>
+              <label>報表名稱</label>
+              <input type="text" id="re-name" placeholder="Travel Push Updated">
+            </div>
+            <div>
+              <label>需求單位</label>
+              <input type="text" id="re-dept" placeholder="行銷部">
+            </div>
+            <div class="re-span-2">
+              <label>說明</label>
+              <textarea id="re-desc" rows="2" placeholder="報表用途說明"></textarea>
+            </div>
+            <div class="re-span-2">
+              <label>檔案名稱（不含日期）</label>
+              <input type="text" id="re-file-base" placeholder="travel_push_updated">
+              <div class="re-muted">實際檔名：{檔名}_{yyyyMMdd}.csv</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="re-section re-section-sql">
+          <h3>SQL</h3>
+          <textarea id="re-sql" class="re-sql-editor" rows="18" placeholder="USE trdata&#10;DECLARE @sdate VARCHAR(10)&#10;...&#10;SELECT ..."></textarea>
+          <div class="re-muted">可貼完整報表批次（USE／DECLARE／#暫存表／多段 SELECT）。禁止 UPDATE／DELETE；DROP 僅允許 #暫存表。預覽另開畫面，取最後一個結果集。</div>
+        </section>
+
+        <section class="re-section" id="re-logs-section" hidden>
+          <h3>執行紀錄</h3>
+          <div class="re-table-wrap" id="re-logs-table"></div>
+        </section>
+      </div>
+
+      <aside class="re-detail-side">
+        <section class="re-section" id="re-output-section">
+          <h3>輸出設定 <span class="re-dev-badge">開發者</span></h3>
+          <label>輸出方式</label>
+          <div class="re-radio-row">
+            <label class="re-inline"><input type="radio" name="re-output-type" value="Local" checked onchange="reOnOutputTypeChange()"> 本機 / Server</label>
+            <label class="re-inline"><input type="radio" name="re-output-type" value="GoogleDrive" onchange="reOnOutputTypeChange()"> Google Drive</label>
+          </div>
+          <div id="re-local-fields">
+            <label>輸出路徑</label>
+            <div class="re-path-row">
+              <input type="text" id="re-local-path" placeholder="D:\Report\Travel">
+              <button type="button" class="btn-ghost" onclick="rePickLocalFolder()">選擇</button>
+            </div>
+            <div class="re-muted">預覽／測試產生 → 測試 SQL 連線與測試資料夾。正式環境請用排程自動丟檔；「立即丟檔」僅開發者模式可見。</div>
+          </div>
+          <div id="re-drive-fields" hidden>
+            <div class="re-muted" id="re-drive-account">Google 帳號：（檢查中）</div>
+            <button type="button" class="btn-ghost" onclick="reEnsureDriveAuth()">授權雲端硬碟</button>
+            <label>正式資料夾</label>
+            <div class="re-path-row">
+              <input type="text" id="re-drive-folder-name" placeholder="顯示名稱" readonly>
+              <button type="button" class="btn-ghost" onclick="rePickDriveFolder('formal')">選擇／建立</button>
+            </div>
+            <input type="text" id="re-drive-folder-id" placeholder="Folder ID 或網址">
+            <button type="button" class="link-btn" onclick="reResolveDriveFolder('formal')">驗證</button>
+            <label>測試資料夾</label>
+            <div class="re-path-row">
+              <input type="text" id="re-drive-test-name" placeholder="顯示名稱" readonly>
+              <button type="button" class="btn-ghost" onclick="rePickDriveFolder('test')">選擇／建立</button>
+            </div>
+            <input type="text" id="re-drive-test-id" placeholder="測試 Folder ID">
+            <button type="button" class="link-btn" onclick="reResolveDriveFolder('test')">驗證</button>
+          </div>
+          <label>檔案存在時</label>
+          <div class="re-radio-col">
+            <label class="re-inline"><input type="radio" name="re-overwrite" value="Overwrite" checked> 覆蓋</label>
+            <label class="re-inline"><input type="radio" name="re-overwrite" value="AppendTimestamp"> 新增時間</label>
+            <label class="re-inline"><input type="radio" name="re-overwrite" value="FailIfExists"> 報錯</label>
+          </div>
+        </section>
+
+        <section class="re-section">
+          <h3>排程</h3>
+          <label class="re-inline"><input type="checkbox" id="re-schedule-enabled" onchange="reOnScheduleToggle()"> 開啟排程</label>
+          <div class="re-muted">App（含托盤）在跑才會執行；完全退出後不跑。</div>
+          <div id="re-schedule-fields" hidden>
+            <label>執行方式</label>
+            <div class="re-radio-col">
+              <label class="re-inline"><input type="radio" name="re-sched-type" value="EveryNMinutes" onchange="reOnScheduleTypeChange()"> 每 N 分鐘</label>
+              <label class="re-inline"><input type="radio" name="re-sched-type" value="EveryNHours" onchange="reOnScheduleTypeChange()"> 每 N 小時</label>
+              <label class="re-inline"><input type="radio" name="re-sched-type" value="Daily" checked onchange="reOnScheduleTypeChange()"> 每天</label>
+              <label class="re-inline"><input type="radio" name="re-sched-type" value="Weekly" onchange="reOnScheduleTypeChange()"> 每週</label>
+              <label class="re-inline"><input type="radio" name="re-sched-type" value="Monthly" onchange="reOnScheduleTypeChange()"> 每月</label>
+            </div>
+            <div id="re-sched-interval-wrap" hidden>
+              <label>間隔 N</label>
+              <input type="number" id="re-sched-interval" min="1" value="5">
+            </div>
+            <div id="re-sched-start-wrap">
+              <label>排程起始日期時間</label>
+              <input type="datetime-local" id="re-sched-start-at">
+              <div class="re-muted">設定後以此為錨點計算週期（例：每 1 小時、從 10:49 起 → 11:49、12:49…）。留空則沿用整點對齊。未改排程設定時，「下次」不會因開啟詳細／儲存而變動。</div>
+            </div>
+            <div id="re-sched-time-wrap">
+              <label>時間（HH:mm）</label>
+              <input type="text" id="re-sched-time" value="16:00" placeholder="16:00">
+            </div>
+            <div id="re-sched-week-wrap" hidden>
+              <label>星期</label>
+              <div class="re-week-row">
+                <label class="re-inline"><input type="checkbox" value="1" class="re-weekday"> 一</label>
+                <label class="re-inline"><input type="checkbox" value="2" class="re-weekday"> 二</label>
+                <label class="re-inline"><input type="checkbox" value="3" class="re-weekday"> 三</label>
+                <label class="re-inline"><input type="checkbox" value="4" class="re-weekday"> 四</label>
+                <label class="re-inline"><input type="checkbox" value="5" class="re-weekday"> 五</label>
+                <label class="re-inline"><input type="checkbox" value="6" class="re-weekday"> 六</label>
+                <label class="re-inline"><input type="checkbox" value="0" class="re-weekday"> 日</label>
+              </div>
+            </div>
+            <div id="re-sched-dom-wrap" hidden>
+              <label>每月幾號</label>
+              <input type="number" id="re-sched-dom" min="1" max="31" value="1">
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <div class="re-preview-view" id="re-preview-view" hidden>
+    <div class="re-toolbar">
+      <button type="button" class="btn-ghost" onclick="reClosePreview()">← 返回詳細</button>
+      <div class="re-title">SQL 預覽</div>
+      <div class="re-toolbar-actions">
+        <button type="button" class="btn-ghost" onclick="rePreview()">重新查詢</button>
+      </div>
+    </div>
+    <div class="re-preview-meta" id="re-preview-meta"></div>
+    <div class="re-table-wrap re-preview-table-wrap" id="re-preview-table">
+      <div class="loading">查詢中…</div>
+    </div>
+  </div>
+</div>
