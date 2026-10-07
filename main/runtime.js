@@ -830,7 +830,13 @@ const FEATURE_LABELS = {
   reportExport: 'SQL 清單列表'
 };
 
-/** [Important] 授權一律請求全部功能 scope，不再依工作台 widget 分批 */
+/** [Important] Product Authorize Set：主按鈕／Reconnect 只請求這些功能，不合併舊 scope */
+const PRODUCT_AUTHORIZE_TYPES = ['calendar', 'gmail', 'notes', 'sheets', 'reportExport'];
+
+function productAuthorizeTypes() {
+  return [...PRODUCT_AUTHORIZE_TYPES];
+}
+
 function allFeatureTypes() {
   return Object.keys(FEATURE_SCOPE_MAP);
 }
@@ -846,25 +852,23 @@ function allApplicationScopes() {
     }
   };
   for (const s of GOOGLE_BASE_SCOPES) add(s);
-  for (const list of Object.values(FEATURE_SCOPE_MAP)) {
-    for (const s of list) add(s);
+  for (const type of PRODUCT_AUTHORIZE_TYPES) {
+    for (const s of FEATURE_SCOPE_MAP[type] || []) add(s);
   }
-  for (const s of GCHAT_EXTENDED_SCOPES) add(s);
   return scopes;
 }
 
 /** 授權後同步順序：Little Reply → 郵件 → 行程 → 其餘 */
 const FEATURE_SYNC_PRIORITY = ['gchat', 'gmail', 'calendar', 'notes', 'sheets', 'sitesVisits', 'chat'];
 
-/** @deprecated 僅相容舊流程；登入勿再一次要全部 */
+/** @deprecated 僅相容舊流程；內容與 Product Authorize Set 對齊，不含 Dev Extra Auth */
 const GOOGLE_SCOPES = [
   ...GOOGLE_BASE_SCOPES,
   ...FEATURE_SCOPE_MAP.calendar,
   ...FEATURE_SCOPE_MAP.gmail,
-  ...GCHAT_CORE_SCOPES,
-  ...GCHAT_EXTENDED_SCOPES,
+  ...FEATURE_SCOPE_MAP.notes,
   ...FEATURE_SCOPE_MAP.sheets,
-  ...FEATURE_SCOPE_MAP.chat
+  ...FEATURE_SCOPE_MAP.reportExport
 ];
 
 const cache = {
@@ -5253,13 +5257,19 @@ ipcMain.handle('ensure-session', async () => {
   }
 });
 
-function mergeGoogleTokens(prev, next) {
+function mergeGoogleTokens(prev, next, { unionScopes = true } = {}) {
   const merged = { ...(prev || {}), ...(next || {}) };
   // [Important] 新 OAuth 回應常不帶 refresh_token，絕不可覆蓋掉既有值
   if (prev?.refresh_token && !next?.refresh_token) {
     merged.refresh_token = prev.refresh_token;
   }
   if (!merged.refresh_token && prev?.refresh_token) merged.refresh_token = prev.refresh_token;
+  if (!unionScopes) {
+    const nextScope = String(next?.scope || '').trim();
+    if (nextScope) merged.scope = nextScope;
+    else if (prev?.scope) merged.scope = prev.scope;
+    return merged;
+  }
   const scopes = new Set(
     `${prev?.scope || ''} ${next?.scope || ''}`.split(/[,\s]+/).filter(Boolean)
   );
@@ -5288,16 +5298,16 @@ async function tokeninfoScopeForAccessToken(accessToken) {
   return '';
 }
 
-async function finalizeOAuthCredentials(client, merged) {
+async function finalizeOAuthCredentials(client, merged, { unionScopes = true } = {}) {
   const prevDisk = readTokensFromDisk();
-  let out = mergeGoogleTokens(prevDisk, merged || {});
+  let out = mergeGoogleTokens(prevDisk, merged || {}, { unionScopes });
   oauth2Client = client;
   oauth2Client.setCredentials(out);
   bindOAuthTokenPersistence(oauth2Client);
   try {
     const refreshed = await oauth2Client.refreshAccessToken();
     if (refreshed?.credentials) {
-      out = mergeGoogleTokens(out, refreshed.credentials);
+      out = mergeGoogleTokens(out, refreshed.credentials, { unionScopes });
       oauth2Client.setCredentials(out);
       bindOAuthTokenPersistence(oauth2Client);
     }
@@ -5508,11 +5518,14 @@ function runGoogleOAuthFlow(scopes, {
       try {
         const { tokens } = await client.getToken(q.get('code'));
         const hadPrev = fs.existsSync(tokenPath());
+        const unionScopes = includeGrantedScopes !== false;
         let merged;
         if (hadPrev) {
           try {
             const prev = JSON.parse(fs.readFileSync(tokenPath(), 'utf8'));
-            merged = prev?.refresh_token ? mergeGoogleTokens(prev, tokens) : { ...tokens };
+            merged = prev?.refresh_token
+              ? mergeGoogleTokens(prev, tokens, { unionScopes })
+              : { ...tokens };
           } catch (_) {
             merged = { ...tokens };
           }
@@ -5520,7 +5533,7 @@ function runGoogleOAuthFlow(scopes, {
           merged = { ...tokens };
         }
         if (!merged.refresh_token && tokens.refresh_token) merged.refresh_token = tokens.refresh_token;
-        merged = await finalizeOAuthCredentials(client, merged);
+        merged = await finalizeOAuthCredentials(client, merged, { unionScopes });
         try {
           // [Important] ADR 0006：OAuth 成功不直接開背景；等 Active Feature List
           reconcileActiveFeatureBackgrounds().catch(() => {});
@@ -5555,18 +5568,19 @@ function runGoogleOAuth(scopes, options = {}) {
 
 ipcMain.handle('auth-google', async () => {
   try {
-    return await runFeaturesOAuth(allFeatureTypes());
+    return await runFeaturesOAuth(productAuthorizeTypes(), { includeGrantedScopes: false });
   } catch (err) { return { success: false, error: err.message }; }
 });
 
-/** [Important] Reconnect：不刪 Credential，強制 consent 重拿 token（ADR 0002） */
+/** [Important] Reconnect：不刪 Credential，只重拿 Product Authorize Set（不合併舊 scope） */
 ipcMain.handle('reconnect-google', async () => {
   try {
     clearOAuthClientMemory();
-    const res = await runFeaturesOAuth(allFeatureTypes(), {
+    const res = await runFeaturesOAuth(productAuthorizeTypes(), {
       forceReauth: true,
       forceConsent: true,
-      cleanReauth: false
+      cleanReauth: false,
+      includeGrantedScopes: false
     });
     if (res?.success) {
       setSessionAuthStatus(AUTH_STATUS.AUTHENTICATED);
@@ -5713,11 +5727,16 @@ async function syncAuthorizedFeatures(types) {
   }
 }
 
-async function runFeaturesOAuth(types, { cleanReauth = false, forceReauth = false, forceConsent = false } = {}) {
+async function runFeaturesOAuth(types, {
+  cleanReauth = false,
+  forceReauth = false,
+  forceConsent = false,
+  includeGrantedScopes = true
+} = {}) {
   const featureList = [...new Set(
     (types || []).map((t) => String(t || '').trim()).filter((t) => FEATURE_SCOPE_MAP[t])
   )];
-  if (!featureList.length) featureList.push(...allFeatureTypes());
+  if (!featureList.length) featureList.push(...productAuthorizeTypes());
 
   const neededScopes = scopesNeededForFeatures(featureList);
 
@@ -5774,7 +5793,7 @@ async function runFeaturesOAuth(types, { cleanReauth = false, forceReauth = fals
   // [TODO] Phase 2: Extract incremental scope authorization into GoogleAuthorizationService
     return runGoogleOAuth(scopeList, {
       forceConsent: useConsent,
-      includeGrantedScopes: true,
+      includeGrantedScopes,
       allowOnlyBase: false
     });
   };
@@ -5855,7 +5874,9 @@ ipcMain.handle('auth-google-features', async (_event, payload) => {
     const types = Array.isArray(payload) ? payload : (payload?.types || []);
     const cleanReauth = !Array.isArray(payload) && payload?.cleanReauth === true;
     const forceReauth = !Array.isArray(payload) && payload?.forceReauth === true;
-    return await runFeaturesOAuth(types, { cleanReauth, forceReauth });
+    const forceConsent = !Array.isArray(payload) && payload?.forceConsent === true;
+    const includeGrantedScopes = Array.isArray(payload) ? true : payload?.includeGrantedScopes !== false;
+    return await runFeaturesOAuth(types, { cleanReauth, forceReauth, forceConsent, includeGrantedScopes });
   } catch (err) {
     return { success: false, error: err.message };
   }

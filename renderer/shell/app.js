@@ -45,8 +45,8 @@
 
         let sessionOffline = false;
         let sessionNeedsReconnect = false;
-        // [Important] 重新連結／首次登入共用的完整功能授權清單
-        const ALL_GOOGLE_FEATURE_TYPES = ['calendar', 'gmail', 'gchat', 'sheets', 'notes', 'sitesVisits', 'chat', 'reportExport'];
+        // [Important] Product Authorize Set：主按鈕／重新連結只請求這些功能
+        const PRODUCT_AUTHORIZE_TYPES = ['calendar', 'gmail', 'notes', 'sheets', 'reportExport'];
 
         function paintCredentialProbe(probe, loginRes = {}) {
             const summaryEl = document.getElementById('auth-probe-summary');
@@ -781,7 +781,8 @@
             if (btn) btn.textContent = '授權中…請看瀏覽器';
             try {
                 const res = await window.api.authGoogleFeatures?.({
-                    types: ALL_GOOGLE_FEATURE_TYPES
+                    types: PRODUCT_AUTHORIZE_TYPES,
+                    includeGrantedScopes: false
                 });
                 if (res?.success) {
                     showWorkspace();
@@ -5589,6 +5590,19 @@
 
 
         // ========== 【MODULE: settings】主題／字級／更新／Tray ==========
+        function refreshMainWorkspace() {
+            window.location.reload();
+        }
+
+        function openThemeMenu(event) {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+            const menu = document.getElementById('theme-menu');
+            document.getElementById('app-settings-menu')?.classList.remove('open');
+            renderThemeMenu();
+            menu?.classList.add('open');
+        }
+
         function toggleThemeMenu() {
             const menu = document.getElementById('theme-menu');
             document.getElementById('app-settings-menu')?.classList.remove('open');

@@ -39,7 +39,7 @@
                 <span class="brand-name">LifeTour</span>
             </h1>
             <div class="theme-picker">
-                <button class="theme-toggle" onclick="toggleThemeMenu()" id="theme-btn" title="切換風格">🎨</button>
+                <button class="theme-toggle" id="theme-btn" title="左鍵重整畫面，右鍵切換風格" onclick="refreshMainWorkspace()" oncontextmenu="openThemeMenu(event)">🎨</button>
                 <div class="theme-menu-list" id="theme-menu"></div>
             </div>
             <div class="app-settings">
@@ -109,10 +109,11 @@
                         <p class="settings-hint" id="re-set-sql-status"></p>
                     </div>
                     <div class="settings-section">
-                        <div class="settings-title">Little Reply（開發者）</div>
-                        <p class="settings-hint">先啟用 Google Chat API。加入「Little Reply」後再在小工具內按「授權使用」即可，不必登入時一次授權全部功能。</p>
+                        <div class="settings-title">開發者額外授權</div>
+                        <p class="settings-hint">僅 npm start 可見。主登入不會請求這些權限；這裡的補授權會保留既有登入。</p>
                         <button class="btn-primary" style="width:100%;" onclick="openGchatApiSetup()">開啟並啟用 Google Chat API</button>
-                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="authorizeGchat()">授權 Google Chat</button>
+                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="authorizeGchat()">補授權 Little Reply</button>
+                        <button class="btn-ghost" style="margin-top:6px;width:100%;" onclick="authorizeFeature('chat')">補授權詢問機器人</button>
                         <p class="settings-hint" id="gchat-settings-hint"></p>
                     </div>
                     <div class="settings-section">
@@ -190,7 +191,7 @@
     <div class="auth-container" id="auth-container">
         <h2>解鎖您的生產力潛能</h2>
         <h1>LifeTour</h1>
-        <p>首次登入會一次取得各功能所需權限；之後重開 App 會沿用登入資料，缺少的權限再補充即可。</p>
+        <p>登入會取得預定行程、記事、未讀郵件、9527 與 SQL 清單列表所需權限。之後重開會沿用登入資料。</p>
         <p class="auth-probe-summary" id="auth-probe-summary" hidden></p>
         <button class="btn-primary" id="btn-login-google" onclick="loginGoogle()">使用 Google 帳號登入並授權</button>
         <button class="btn-ghost" id="btn-reconnect-google" hidden onclick="reconnectGoogleFromLogin()">重新連結 Google（不清除本機登入檔）</button>

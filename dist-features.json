@@ -1,9 +1,9 @@
 {
-  "_comment": "[Manual] 加入功能左側打勾＝正式版會提供。未勾＝僅 npm start 可測，正式安裝包不會出現。",
+  "_comment": "[Manual] 加入功能左側打勾＝正式版會提供。未勾＝僅 npm start 可測，正式安裝包不會出現。gchat 未勾＝Little Reply 正式包下架，開發模式仍可加入。",
   "widgets": {
     "calendar": true,
     "gmail": true,
-    "gchat": true,
+    "gchat": false,
     "sheets": true,
     "notes": true,
     "sitesVisits": false,

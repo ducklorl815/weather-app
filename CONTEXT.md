@@ -1,6 +1,6 @@
 # LifeTour
 
-Desktop productivity hub that integrates Google workspace features and internal tools. This glossary covers product language for the app. Active design work spans 記事 (Sheets by spreadsheetId + local ID index), Mosaic Active Features（加入／移除與背景生命週期）, Little Reply (Reply Bar／Toast 提醒、@ 真提及／僅參考標籤), Google authorization / session, and 9527 Sheets Inbox.
+Desktop productivity hub that integrates Google workspace features and internal tools. This glossary covers product language for the app. Active design work spans 記事 (Sheets by spreadsheetId + local ID index), Mosaic Active Features（加入／移除與背景生命週期）, Little Reply shelved from the product surface, Product Authorize Set, Workspace Refresh, Google authorization / session, and 9527 Sheets Inbox.
 
 ## Language
 
@@ -16,7 +16,15 @@ _Avoid_: “enable”, “install”, “authorize” (those mean prefs, packagi
 
 **Feature Off**:
 Removing a feature tile from the Mosaic so it is no longer an Active Feature: that feature's background work must stop, and must not revive on restart until Feature On again. For Little Reply this also means destroying Reply Pop／Reply Bar／Quick Search and disabling related global shortcuts; Google Session and Credential stay.
-_Avoid_: Logout; turning off Toast alone; “disable packaging flag” (dist-features)
+_Avoid_: Logout; turning off Toast alone; “disable packaging flag” (dist-features); Shelved Feature (published catalog only; developer mode may still Feature On)
+
+**Shelved Feature**:
+A catalog feature whose code and screens remain in the product. On the published app it is absent from「加入功能」, is taken off the Mosaic if it was already placed, and does not run background work. In developer mode it can still be added and used. Little Reply is shelved until it is ready to publish.
+_Avoid_: Feature Off; deleting the module; Logout; hiding it from developer mode
+
+**Workspace Refresh**:
+Reloading the main workspace while its window is still open, so a stuck screen can recover without quitting the app. It does not run when the process has already exited.
+_Avoid_: Logout; relaunch; changing the theme
 
 **Active Feature List**:
 The set of Active Feature type ids derived from the current Mosaic layout. The Renderer owns the layout and pushes this list to Main; Main must not start feature background work before receiving it.
@@ -32,9 +40,17 @@ _Avoid_: treating every OAuth browser prompt as “logged out”; conflating Fea
 The persisted Google OAuth tokens (access, refresh, granted scopes) stored as `google_token.json` under the app userData path. Only explicit Logout may delete the Credential file.
 _Avoid_: calling the Credential “session” alone; assuming hard refresh failure deletes the file (it must not)
 
+**Product Authorize Set**:
+The features whose Google scopes are requested together on the main authorize click: 預定行程, 記事, 未讀郵件, 9527, and SQL 清單列表.
+_Avoid_: treating every catalog entry, a Shelved Feature, or a developer-only feature as part of that click
+
 **Full Login**:
-The first-time (or post-Logout) OAuth that requests the full application scope set so the user can use LifeTour’s Google features without immediately hitting gates.
-_Avoid_: “sign in” when you only mean Incremental Auth; identity-only login as the product default (code comments that say base scopes only are outdated relative to this policy)
+The first-time (or post-Logout) OAuth that requests the Product Authorize Set so those features can be used without immediately hitting gates. It does not merge previously granted scopes into that consent.
+_Avoid_: “sign in” when you only mean Incremental Auth; identity-only login as the product default; folding developer-only or shelved scopes into the same click
+
+**Dev Extra Auth**:
+Incremental Auth shown only in developer mode, for features outside the Product Authorize Set. It covers Little Reply and 詢問機器人. 網站瀏覽紀錄 adds no scopes beyond the Product Authorize Set.
+_Avoid_: putting these scopes on the main authorize click; Logout
 
 **Incremental Auth**:
 A later OAuth that only requests scopes still missing for one or more features, without clearing the existing Credential.
@@ -57,8 +73,8 @@ The minimum Chat scopes required to run Inbox / Reply Pop main paths (messages, 
 _Avoid_: blocking the whole Little Reply surface when only extended scopes are missing
 
 **Little Reply Extended Scopes**:
-Optional Chat-related scopes (e.g. directory, contacts, custom emoji) requested at Full Login when possible, but enforceable via Incremental Auth only when that capability is used.
-_Avoid_: treating extended gaps as Session loss or as a full Little Reply Feature Scope Gate
+Optional Chat-related scopes (e.g. directory, contacts, custom emoji). They are outside the Product Authorize Set while Little Reply is shelved.
+_Avoid_: treating extended gaps as Session loss or as a full Little Reply Feature Scope Gate; requesting them on the main authorize click
 
 **Credential Path Probe**:
 Startup/login diagnostics that show the active userData Credential path (details collapsed by default) and can detect another known directory that still has a Credential. If the active path has no Credential and a known alternate does, auto-copy into the active path and record the migrate in expandable diagnostics.
