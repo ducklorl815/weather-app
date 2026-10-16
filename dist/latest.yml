@@ -1,8 +1,8 @@
-version: 1.0.9
+version: 1.1.5
 files:
-  - url: LifeTour-Setup-1.0.9.exe
-    sha512: fY4vl4AqjGs3Cw4q9GtUhM1s42t3w8BacuSUMo5ge1SSPq4xDErCKM9lsogM6Jp7xEFfOEAJgENOVNSVf2ylBA==
-    size: 84521497
-path: LifeTour-Setup-1.0.9.exe
-sha512: fY4vl4AqjGs3Cw4q9GtUhM1s42t3w8BacuSUMo5ge1SSPq4xDErCKM9lsogM6Jp7xEFfOEAJgENOVNSVf2ylBA==
-releaseDate: '2026-09-07T08:11:47.696Z'
+  - url: LifeTour-Setup-1.1.5.exe
+    sha512: 8DwAjZ46H/5aJ1t5kHZuC0u/Dr65hwlV9lDJEYHSaRO0lbK2zSd5Bug26pIdzfQJavfR6ErZK+Mqv4Gih4dIPQ==
+    size: 84609541
+path: LifeTour-Setup-1.1.5.exe
+sha512: 8DwAjZ46H/5aJ1t5kHZuC0u/Dr65hwlV9lDJEYHSaRO0lbK2zSd5Bug26pIdzfQJavfR6ErZK+Mqv4Gih4dIPQ==
+releaseDate: '2026-10-07T02:59:55.928Z'
